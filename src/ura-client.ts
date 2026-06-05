@@ -118,7 +118,14 @@ async function invokeBroker(brokerUrl: string, service: string, params: Record<s
 
 async function parseUraResponse(response: Response): Promise<unknown> {
   if (response.status === 429) throw new UraError("URA_RATE_LIMITED", "URA rate limit exceeded.");
-  if (!response.ok) throw new UraError("URA_SERVICE_UNAVAILABLE", `URA returned HTTP ${response.status}.`);
+  if (!response.ok) {
+    const payload = await tryJson(response);
+    const code = String(payload?.error?.code ?? payload?.code ?? "");
+    const message = String(payload?.error?.message ?? payload?.Message ?? payload?.message ?? `URA returned HTTP ${response.status}.`);
+    if (code === "URA_RATE_LIMITED" || response.status === 429) throw new UraError("URA_RATE_LIMITED", message);
+    if (code === "URA_AUTH_FAILED" || response.status === 401 || response.status === 403) throw new UraError("URA_AUTH_FAILED", "URA authentication failed.");
+    throw new UraError("URA_SERVICE_UNAVAILABLE", message);
+  }
   const payload = (await response.json()) as Record<string, unknown>;
   const status = String(payload.Status ?? payload.status ?? "Success").toLowerCase();
   const message = String(payload.Message ?? payload.message ?? "");
@@ -127,6 +134,14 @@ async function parseUraResponse(response: Response): Promise<unknown> {
     throw new UraError("URA_SERVICE_UNAVAILABLE", message || "URA returned unsuccessful status.");
   }
   return payload;
+}
+
+async function tryJson(response: Response): Promise<Record<string, any> | null> {
+  try {
+    return (await response.json()) as Record<string, any>;
+  } catch {
+    return null;
+  }
 }
 
 function singaporeDate(): string {

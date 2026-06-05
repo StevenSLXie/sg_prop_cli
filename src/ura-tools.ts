@@ -1,6 +1,6 @@
 import { baseMeta, fail, ok, sourceAttribution } from "./envelope.js";
-import { rowMatchesFilters, validateFilters } from "./filters.js";
-import { compactFields, requireSource } from "./registry.js";
+import { resolveFilterAliases, rowMatchesFilters, validateFilters } from "./filters.js";
+import { compactFields, requireSource, resolveFieldNames } from "./registry.js";
 import { countBy, numericSummary, summaryMeta } from "./summary.js";
 import type { HousingFilters, ResultEnvelope, SourceKey, SummaryMeta } from "./types.js";
 import { UraClient, UraError } from "./ura-client.js";
@@ -40,10 +40,10 @@ export async function findPrivateResidentialSaleComparables(
   const source = requireSource("ura_private_residential_transactions");
   const limit = boundedLimit(input.limit ?? 30, 300);
   if (input.include_raw && limit > 50) return rawLimitError("find_private_residential_sale_comparables", source.source_key);
-  const select = input.select?.length ? input.select : compactFields(source);
+  const select = input.select?.length ? resolveFieldNames(source.fields, input.select) : compactFields(source);
   const selectError = validateSelect(source.source_key, select);
   if (selectError) return selectError("find_private_residential_sale_comparables");
-  const filters = saleFilters(input);
+  const filters = resolveFilterAliases(source.fields, saleFilters(input));
   const validation = validateFilters(source.fields, filters);
   if (validation.length) {
     return fail("find_private_residential_sale_comparables", "VALIDATION_ERROR", "Invalid private sale filters.", "Inspect source fields and retry.", {
@@ -95,10 +95,10 @@ export async function findPrivateResidentialRentalContracts(
   const source = requireSource("ura_private_residential_rentals");
   const limit = boundedLimit(input.limit ?? 30, 300);
   if (input.include_raw && limit > 50) return rawLimitError("find_private_residential_rental_contracts", source.source_key);
-  const select = input.select?.length ? input.select : compactFields(source);
+  const select = input.select?.length ? resolveFieldNames(source.fields, input.select) : compactFields(source);
   const selectError = validateSelect(source.source_key, select);
   if (selectError) return selectError("find_private_residential_rental_contracts");
-  const filters = rentalFilters(input);
+  const filters = resolveFilterAliases(source.fields, rentalFilters(input));
   const validation = validateFilters(source.fields, filters);
   if (validation.length) {
     return fail("find_private_residential_rental_contracts", "VALIDATION_ERROR", "Invalid private rental filters.", "Inspect source fields and retry.", {
@@ -176,12 +176,12 @@ async function simpleUraRows(
   const source = requireSource(sourceKey);
   const limit = boundedLimit(input.limit ?? 50, 500);
   if (input.include_raw && limit > 50) return rawLimitError(tool, sourceKey);
-  const select = input.select?.length ? input.select : compactFields(source);
+  const select = input.select?.length ? resolveFieldNames(source.fields, input.select) : compactFields(source);
   const selectError = validateSelect(sourceKey, select);
   if (selectError) return selectError(tool);
   try {
     const payload = await client.invoke(service, {});
-    const filters = genericFilters(input);
+    const filters = resolveFilterAliases(source.fields, genericFilters(input));
     const scannedRows = flattener(payload);
     const rows = scannedRows.filter((row) => rowMatchesFilters(row, filters));
     const projected = rows.slice(0, limit).map((row) => project(row, select, Boolean(input.include_raw)));
@@ -315,7 +315,7 @@ function saleFilters(input: PrivateRowsInput): HousingFilters {
     market_segment: input.market_segment,
     property_type: input.property_type,
     type_of_sale: input.type_of_sale,
-    contract_month: range(input.from, input.to),
+    contract_month: range(normalizeMonthInput(input.from), normalizeMonthInput(input.to)),
     area_sqm: range(input.min_area_sqm, input.max_area_sqm),
     price: range(input.min_price, input.max_price),
     price_psf: range(input.min_price_psf, input.max_price_psf),
@@ -404,6 +404,12 @@ function normalizeMonthFromMmyy(mmyy: string): string {
   return `${century + yy}-${month}`;
 }
 
+function normalizeMonthInput(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const match = /^(\d{4}-\d{2})(?:-\d{2})?$/.exec(value);
+  return match ? match[1] : value;
+}
+
 function normalizeQuarter(value: string): string {
   const match = /^(\d{2})q([1-4])$/i.exec(value);
   if (!match) return value;
@@ -489,7 +495,13 @@ function validateSelect(sourceKey: SourceKey, select: string[]) {
 
 function uraFailure(tool: string, sourceKey: SourceKey, error: unknown) {
   if (error instanceof UraError) {
-    return fail(tool, error.code, error.message, "Configure an approved URA credential strategy or use public data.gov.sg sources.", {
+    const nextAction =
+      error.code === "URA_REQUIRES_MAINTAINED_DISTRIBUTION"
+        ? "Use the maintained package/proxy or configure an approved URA credential strategy."
+        : error.code === "URA_AUTH_FAILED"
+          ? "Retry later; if this persists, the maintainer should rotate or verify the URA proxy credential."
+          : "Retry later or narrow the query; if this persists, the maintainer should inspect the URA proxy and upstream URA Data Service.";
+    return fail(tool, error.code, error.message, nextAction, {
       recoverable: error.code === "URA_RATE_LIMITED" || error.code === "URA_SERVICE_UNAVAILABLE",
       affected_sources: [sourceKey]
     });

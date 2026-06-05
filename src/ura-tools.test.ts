@@ -61,6 +61,42 @@ describe("URA private sale tool", () => {
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
   });
+
+  it("accepts contract_date as an alias for contract_month and normalizes day inputs to month filters", async () => {
+    const fakeClient = {
+      async invoke() {
+        return {
+          Status: "Success",
+          Result: [
+            {
+              project: "D'LEEDON",
+              street: "LEEDON HEIGHTS",
+              marketSegment: "CCR",
+              transaction: [
+                {
+                  contractDate: "0326",
+                  area: "100",
+                  price: "2000000",
+                  propertyType: "Condominium",
+                  typeOfSale: "3",
+                  district: "10"
+                }
+              ]
+            }
+          ]
+        };
+      }
+    };
+
+    const result = await findPrivateResidentialSaleComparables(
+      { project: "D'LEEDON", from: "2026-03-05", to: "2026-06-05", select: ["contract_date", "project", "price"], limit: 5 },
+      fakeClient as never
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.rows?.[0]).toEqual({ contract_month: "2026-03", project: "D'LEEDON", price: 2000000 });
+  });
 });
 
 describe("URA private rental tool", () => {
@@ -122,6 +158,28 @@ describe("URA client proxy routing", () => {
     const client = new UraClient();
     await expect(client.invoke("PMI_Resi_Transaction", { batch: 1 })).resolves.toEqual({ Status: "Success", Result: [] });
     expect(calls).toEqual(["https://example.test/ura"]);
+
+    globalThis.fetch = oldFetch;
+    if (oldBroker === undefined) delete process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
+    else process.env.SG_HOUSING_URA_TOKEN_BROKER_URL = oldBroker;
+  });
+
+  it("surfaces proxy error messages instead of generic HTTP status", async () => {
+    const oldFetch = globalThis.fetch;
+    const oldBroker = process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
+    process.env.SG_HOUSING_URA_TOKEN_BROKER_URL = "https://example.test/ura";
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          Status: "Error",
+          Message: "URA network request failed: fetch failed",
+          error: { code: "URA_SERVICE_UNAVAILABLE", message: "URA network request failed: fetch failed" }
+        }),
+        { status: 503 }
+      )) as typeof fetch;
+
+    const client = new UraClient();
+    await expect(client.invoke("PMI_Resi_Transaction", { batch: 1 })).rejects.toThrow("URA network request failed: fetch failed");
 
     globalThis.fetch = oldFetch;
     if (oldBroker === undefined) delete process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;

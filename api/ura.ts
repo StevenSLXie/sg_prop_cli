@@ -72,10 +72,7 @@ async function invokeUra(accessKey: string, service: string, params: Record<stri
       url.searchParams.set(key, String(value));
     }
 
-    const upstream = await fetch(url, {
-      headers: { accept: "application/json", AccessKey: accessKey, Token: currentToken },
-      signal: AbortSignal.timeout(20000)
-    });
+    const upstream = await fetchWithRetry(url, { headers: { accept: "application/json", AccessKey: accessKey, Token: currentToken } }, 25000);
 
     try {
       return await parseUraResponse(upstream);
@@ -101,10 +98,7 @@ async function getToken(accessKey: string): Promise<string> {
 }
 
 async function fetchToken(accessKey: string, today: string): Promise<string> {
-  const upstream = await fetch(TOKEN_URL, {
-    headers: { accept: "application/json", AccessKey: accessKey },
-    signal: AbortSignal.timeout(15000)
-  });
+  const upstream = await fetchWithRetry(TOKEN_URL, { headers: { accept: "application/json", AccessKey: accessKey } }, 15000);
   const payload = await parseUraResponse(upstream);
   const result = payload && typeof payload === "object" ? (payload as Record<string, unknown>).Result : null;
   if (typeof result !== "string" || !result) {
@@ -128,6 +122,18 @@ async function parseUraResponse(upstream: Response): Promise<unknown> {
     throw new ProxyError("URA_SERVICE_UNAVAILABLE", message || "URA returned unsuccessful status.");
   }
   return payload;
+}
+
+async function fetchWithRetry(input: string | URL, init: RequestInit, timeoutMs: number): Promise<Response> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw new ProxyError("URA_SERVICE_UNAVAILABLE", `URA network request failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }
 
 function validateTransactionParams(params: unknown): Record<string, number> {
@@ -206,7 +212,11 @@ function mapError(error: unknown): { status: number; code: string; message: stri
               : 503;
     return { status, code: error.code, message: error.message };
   }
-  return { status: 500, code: "INTERNAL_ERROR", message: error instanceof Error ? error.message : String(error) };
+  const message = error instanceof Error ? error.message : String(error);
+  if (/fetch failed|network|timeout|aborted/i.test(message)) {
+    return { status: 503, code: "URA_SERVICE_UNAVAILABLE", message: `URA network request failed: ${message}` };
+  }
+  return { status: 500, code: "INTERNAL_ERROR", message };
 }
 
 class ProxyError extends Error {

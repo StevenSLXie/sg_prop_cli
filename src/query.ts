@@ -1,8 +1,8 @@
 import { DataGovClient, DataGovError } from "./datagov-client.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
 import { baseMeta, fail, ok, sourceAttribution } from "./envelope.js";
-import { normalizeFilters, rowMatchesFilters, validateFilters } from "./filters.js";
-import { compactFields, requireSource } from "./registry.js";
+import { normalizeFilters, resolveFilterAliases, rowMatchesFilters, validateFilters } from "./filters.js";
+import { compactFields, requireSource, resolveFieldNames } from "./registry.js";
 import type { HousingFilters, ResultEnvelope, SourceKey } from "./types.js";
 
 const DEFAULT_LIMIT = 50;
@@ -74,6 +74,8 @@ export async function queryHousingRows(
   }
 
   const source = requireSource(sourceKey);
+  filters = resolveFilterAliases(source.fields, filters);
+  select = select ? resolveFieldNames(source.fields, select) : select;
   if (source.backend !== "data_gov_sg") {
     return fail(
       tool,

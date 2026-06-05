@@ -191,7 +191,7 @@ export const SOURCES: SourceDefinition[] = [
       field("street", "string", ["eq", "contains"], { default_selected: true, compact_priority: 2 }),
       field("district", "string", ["eq", "in"], { default_selected: true, compact_priority: 3 }),
       field("market_segment", "string", ["eq", "in"], { default_selected: true, compact_priority: 4 }),
-      field("contract_month", "month", ["eq", "gte", "lte"], { default_selected: true, compact_priority: 5 }),
+      field("contract_month", "month", ["eq", "gte", "lte"], { default_selected: true, compact_priority: 5, aliases: ["contract_date", "contractDate", "date"] }),
       field("type_of_sale", "string", ["eq", "in"], { default_selected: true, compact_priority: 6 }),
       field("property_type", "string", ["eq", "in"], { default_selected: true, compact_priority: 7 }),
       field("area_sqm", "number", ["eq", "gte", "lte"], { default_selected: true, compact_priority: 8 }),
@@ -370,6 +370,17 @@ export function compactFields(source: SourceDefinition): string[] {
     .filter((field) => field.default_selected)
     .sort((a, b) => (a.compact_priority ?? 999) - (b.compact_priority ?? 999))
     .map((field) => field.name);
+}
+
+export function resolveFieldName(fields: FieldCatalogEntry[], fieldName: string): string {
+  const direct = fields.find((field) => field.name === fieldName);
+  if (direct) return direct.name;
+  const alias = fields.find((field) => field.aliases?.includes(fieldName));
+  return alias?.name ?? fieldName;
+}
+
+export function resolveFieldNames(fields: FieldCatalogEntry[], fieldNames: string[]): string[] {
+  return fieldNames.map((fieldName) => resolveFieldName(fields, fieldName));
 }
 
 export function isSourceKey(value: string): value is SourceKey {

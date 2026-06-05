@@ -1,7 +1,8 @@
 {
   "functions": {
     "api/ura.ts": {
-      "maxDuration": 30
+      "maxDuration": 60,
+      "regions": ["sin1"]
     }
   }
 }

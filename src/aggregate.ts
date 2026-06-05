@@ -1,7 +1,7 @@
 import { DataGovClient, DataGovError } from "./datagov-client.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
 import { baseMeta, fail, ok, sourceAttribution } from "./envelope.js";
-import { normalizeFilters, rowMatchesFilters, validateFilters } from "./filters.js";
+import { resolveFilterAliases, rowMatchesFilters, validateFilters } from "./filters.js";
 import { requireSource } from "./registry.js";
 import { normalizeRow } from "./query.js";
 import type { HousingFilters, ResultEnvelope, SourceKey } from "./types.js";
@@ -87,6 +87,7 @@ export async function aggregateHousingRows(
   }
 
   const source = requireSource(sourceKey);
+  filters = resolveFilterAliases(source.fields, filters);
   if (!OPERATIONS.has(operation)) {
     return fail(tool, "VALIDATION_ERROR", `Invalid operation '${operation}'.`, "Use count, group_count, top_n_by_count, or numeric_summary.", {
       affected_sources: [source.source_key],

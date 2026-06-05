@@ -1,4 +1,5 @@
 import type { FieldCatalogEntry, FilterCondition, FilterOperator, HousingFilters } from "./types.js";
+import { resolveFieldName } from "./registry.js";
 
 export type NormalizedFilter = {
   field: string;
@@ -78,6 +79,21 @@ export function validateFilters(fields: FieldCatalogEntry[], filters: HousingFil
     }
   }
   return errors;
+}
+
+export function resolveFilterAliases(fields: FieldCatalogEntry[], filters: HousingFilters | undefined): HousingFilters | undefined {
+  if (!filters) return undefined;
+  const resolved: HousingFilters = {};
+  for (const [rawFieldName, condition] of Object.entries(filters)) {
+    const suffix = suffixOperator(rawFieldName);
+    if (suffix) {
+      const baseName = rawFieldName.slice(0, -`_${suffix}`.length);
+      resolved[`${resolveFieldName(fields, baseName)}_${suffix}`] = condition;
+      continue;
+    }
+    resolved[resolveFieldName(fields, rawFieldName)] = condition;
+  }
+  return resolved;
 }
 
 function suffixOperator(fieldName: string): "gte" | "lte" | null {
