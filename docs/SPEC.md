@@ -92,7 +92,7 @@ URA credential policy:
 - Product goal: end users should have the smoothest possible experience, but credential handling must comply with URA API terms and keep access control credentials secure and confidential.
 - A redistributable package must not treat an extractable shared `AccessKey` as the default sustainable design. Embedding a real URA key in an npm package, even a private package, is allowed only if the maintainer has explicit written permission or the distribution is an internal controlled environment where every recipient is authorized under the key holder's account.
 - Supported v1 credential strategies, in priority order:
-  - `URA_ACCESS_KEY` environment override for development, emergency rotation, or advanced users;
+  - `URA_ACCESS_KEY` environment fallback for forked/internal builds where no maintained proxy URL is configured;
   - a maintainer-operated token broker/proxy that keeps the URA `AccessKey` server-side and returns only scoped short-lived access to this client;
   - an embedded maintained key only for explicitly authorized controlled distributions.
 - The CLI/MCP should hide credential mechanics from normal users when an approved maintained strategy is available.
@@ -105,7 +105,7 @@ Distribution modes:
 
 - `public`: public repo/public npm package. HDB, CEA, and data.gov.sg-backed URA summary tools work without credentials. URA Data Service detailed tools are hidden by default from convenience prompts and shown as `unavailable` in `sources`/`doctor` with a friendly message.
 - `maintained`: distribution configured with an approved maintained credential strategy: token broker/proxy, authorized embedded key, or managed local deployment. Detailed URA Data Service tools work out of the box only when that strategy is healthy.
-- `development`: source checkout. Detailed URA Data Service tools require `URA_ACCESS_KEY`; otherwise behavior matches `public`.
+- `development`: source checkout. Detailed URA Data Service tools still use the maintained default proxy when configured; direct `URA_ACCESS_KEY` is only a fallback for forked/internal builds without a proxy URL.
 - The active mode must be included in `sources`, `doctor`, CLI errors, and MCP error payloads as `distribution_mode`.
 - `npx -y sg-housing-data mcp` is only guaranteed to provide detailed URA tools if it resolves to a maintained distribution with an approved credential strategy. Public `npx` must not be advertised as supporting detailed URA tools out of the box.
 
@@ -903,7 +903,7 @@ Credential expectation:
 
 - End users should not configure URA credentials when they install an approved maintained distribution.
 - In a maintained distribution, `sg-housing mcp` should already have access through the approved credential strategy without exposing the maintainer's URA `AccessKey` to the user.
-- Developers can set `URA_ACCESS_KEY` to override maintained credentials during local development.
+- Developers should use the maintained proxy by default. Direct `URA_ACCESS_KEY` is only a fallback for forked/internal builds without a proxy URL.
 - `sg-housing sources --category ura --json` should show whether detailed URA private residential tools are available, without exposing credentials.
 
 npm global install:
@@ -1181,7 +1181,7 @@ Milestone 1: Spec and source registry
 - define the maintained credential provider:
   - public source contains only a placeholder;
   - maintained distribution uses a token broker/proxy, managed local provider, or explicitly authorized embedded key;
-  - `URA_ACCESS_KEY` overrides maintained credentials;
+  - the maintained default proxy is preferred over local `URA_ACCESS_KEY` in the public package;
   - build/test checks prevent accidental real-key inclusion in public artifacts;
 - document fields and caveats.
 - implement `validate-registry` design:

@@ -11,7 +11,7 @@ MCP command: `sg-housing mcp`
 ## Public Release Rules
 
 - Do not publish a real URA `AccessKey`.
-- Public npm releases run in `public` mode unless a user supplies `URA_ACCESS_KEY`, a maintained token broker configuration, or the package has a maintained default proxy URL.
+- Public npm releases use the maintained default Vercel proxy URL for URA detailed tools. End users should not configure `URA_ACCESS_KEY`.
 - Detailed URA Data Service tools must degrade with `URA_REQUIRES_MAINTAINED_DISTRIBUTION` when credentials are unavailable.
 - Machine-readable CLI output goes to stdout. Logs and diagnostics go to stderr.
 - Update checks are explicit or doctor-only: `sg-housing mcp` must not print upgrade prompts or perform install actions on startup.
@@ -49,18 +49,18 @@ node dist/cli.js rows --source cea_residential_transactions --filter town=YISHUN
 node dist/cli.js private sales --project TURQUOISE --district 04 --limit 5 --json
 ```
 
-The private sale command should return a structured URA credential error in public mode, or bounded compact rows when an approved credential strategy is configured.
+The private sale command should return bounded compact rows through the maintained default proxy. It should not require local `URA_ACCESS_KEY`.
 
 ## Maintained URA Proxy
 
-For zero-config private residential tools, deploy the Vercel proxy in [VERCEL_PROXY.md](VERCEL_PROXY.md), set `URA_ACCESS_KEY` only in Vercel environment variables, and set the deployed `/api/ura` URL as the maintained default in `src/credentials.ts` before publishing a maintained release.
+For zero-config private residential tools, deploy the Vercel proxy in [VERCEL_PROXY.md](VERCEL_PROXY.md), set `URA_ACCESS_KEY` only in Vercel environment variables, and keep the deployed `/api/ura` URL as the maintained default in `src/credentials.ts` before publishing.
 
 Smoke test before release:
 
 ```bash
 curl https://<project>.vercel.app/api/ura
-SG_HOUSING_URA_TOKEN_BROKER_URL=https://<project>.vercel.app/api/ura node dist/cli.js doctor --mcp --json
-SG_HOUSING_URA_TOKEN_BROKER_URL=https://<project>.vercel.app/api/ura node dist/cli.js private sales --project TURQUOISE --limit 5 --json
+env -u SG_HOUSING_URA_TOKEN_BROKER_URL -u URA_ACCESS_KEY node dist/cli.js doctor --mcp --json
+env -u SG_HOUSING_URA_TOKEN_BROKER_URL -u URA_ACCESS_KEY node dist/cli.js private sales --project TURQUOISE --district 04 --limit 5 --json
 ```
 
 ## Publish
@@ -70,7 +70,7 @@ npm login
 npm publish --access public
 ```
 
-For a private maintained distribution, publish to the private registry or scope configured by the maintainer. Use a token broker or another approved credential strategy; do not put an extractable shared URA key in a public artifact.
+For a private maintained distribution, publish to the private registry or scope configured by the maintainer. Use a token broker or another approved credential strategy; do not put an extractable shared URA key in an npm artifact.
 
 ## Claude CLI Config
 

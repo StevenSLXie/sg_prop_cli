@@ -58,14 +58,14 @@ After deployment:
 curl https://<project>.vercel.app/api/ura
 ```
 
-Then point the local package at the proxy:
+If testing a custom proxy before making it the default, point the local package at it:
 
 ```bash
 SG_HOUSING_URA_TOKEN_BROKER_URL=https://<project>.vercel.app/api/ura sg-housing doctor --mcp --json
 SG_HOUSING_URA_TOKEN_BROKER_URL=https://<project>.vercel.app/api/ura sg-housing private sales --project TURQUOISE --limit 5 --json
 ```
 
-For a smooth public npm release, set the deployed proxy URL as the maintained default before publishing that release. Keep `URA_ACCESS_KEY` as a development and emergency override.
+For the smooth public npm release, keep the deployed proxy URL as the maintained default before publishing. The normal local package path should use the Vercel proxy regardless of distribution mode; `URA_ACCESS_KEY` belongs in Vercel environment variables, not on end-user machines.
 
 ## Security Notes
 

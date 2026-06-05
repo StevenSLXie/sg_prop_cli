@@ -78,59 +78,53 @@ describe("URA private rental tool", () => {
   });
 });
 
-describe("URA client token retry", () => {
-  it("refreshes token and retries once on JSON auth failure", async () => {
+describe("URA client proxy routing", () => {
+  it("uses the maintained default proxy instead of direct URA token endpoints", async () => {
     const oldFetch = globalThis.fetch;
     const oldKey = process.env.URA_ACCESS_KEY;
+    const oldBroker = process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
     const calls: string[] = [];
+    const bodies: unknown[] = [];
     process.env.URA_ACCESS_KEY = "test-key";
-    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+    delete process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(input);
       calls.push(url);
-      if (url.includes("insertNewToken")) {
-        return new Response(JSON.stringify({ Status: "Success", Result: `token-${calls.length}` }), { status: 200 });
-      }
-      if (calls.filter((call) => call.includes("invokeUraDS")).length === 1) {
-        return new Response(JSON.stringify({ Status: "Error", Message: "invalid token" }), { status: 200 });
-      }
+      bodies.push(JSON.parse(String(init?.body)));
       return new Response(JSON.stringify({ Status: "Success", Result: [] }), { status: 200 });
     }) as typeof fetch;
 
     const client = new UraClient();
     const result = await client.invoke("PMI_Resi_Transaction", { batch: 1 });
     expect(result).toEqual({ Status: "Success", Result: [] });
-    expect(calls.filter((call) => call.includes("insertNewToken")).length).toBe(2);
-    expect(calls.filter((call) => call.includes("invokeUraDS")).length).toBe(2);
+    expect(calls).toEqual(["https://sg-housing-data-mcp-spec.vercel.app/api/ura"]);
+    expect(calls.some((call) => call.includes("insertNewToken") || call.includes("invokeUraDS"))).toBe(false);
+    expect(bodies).toEqual([{ service: "PMI_Resi_Transaction", params: { batch: 1 } }]);
 
     globalThis.fetch = oldFetch;
     if (oldKey === undefined) delete process.env.URA_ACCESS_KEY;
     else process.env.URA_ACCESS_KEY = oldKey;
+    if (oldBroker === undefined) delete process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
+    else process.env.SG_HOUSING_URA_TOKEN_BROKER_URL = oldBroker;
   });
 
-  it("does not retry more than once across HTTP and JSON auth failures", async () => {
+  it("allows maintainers to override the proxy URL explicitly", async () => {
     const oldFetch = globalThis.fetch;
-    const oldKey = process.env.URA_ACCESS_KEY;
+    const oldBroker = process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
     const calls: string[] = [];
-    process.env.URA_ACCESS_KEY = "test-key";
+    process.env.SG_HOUSING_URA_TOKEN_BROKER_URL = "https://example.test/ura";
     globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
       const url = String(input);
       calls.push(url);
-      if (url.includes("insertNewToken")) {
-        return new Response(JSON.stringify({ Status: "Success", Result: `token-${calls.length}` }), { status: 200 });
-      }
-      if (calls.filter((call) => call.includes("invokeUraDS")).length === 1) {
-        return new Response("{}", { status: 403 });
-      }
-      return new Response(JSON.stringify({ Status: "Error", Message: "invalid token" }), { status: 200 });
+      return new Response(JSON.stringify({ Status: "Success", Result: [] }), { status: 200 });
     }) as typeof fetch;
 
     const client = new UraClient();
-    await expect(client.invoke("PMI_Resi_Transaction", { batch: 1 })).rejects.toThrow(/authentication/i);
-    expect(calls.filter((call) => call.includes("insertNewToken")).length).toBe(2);
-    expect(calls.filter((call) => call.includes("invokeUraDS")).length).toBe(2);
+    await expect(client.invoke("PMI_Resi_Transaction", { batch: 1 })).resolves.toEqual({ Status: "Success", Result: [] });
+    expect(calls).toEqual(["https://example.test/ura"]);
 
     globalThis.fetch = oldFetch;
-    if (oldKey === undefined) delete process.env.URA_ACCESS_KEY;
-    else process.env.URA_ACCESS_KEY = oldKey;
+    if (oldBroker === undefined) delete process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
+    else process.env.SG_HOUSING_URA_TOKEN_BROKER_URL = oldBroker;
   });
 });

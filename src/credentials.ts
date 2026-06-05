@@ -22,11 +22,6 @@ export function getDistributionMode(): DistributionMode {
 }
 
 export function getCredentialStrategy(): CredentialStrategy {
-  const accessKey = process.env.URA_ACCESS_KEY;
-  if (accessKey && accessKey.trim()) {
-    return { kind: "env_access_key", accessKey: accessKey.trim() };
-  }
-
   const brokerUrl = process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
   if (brokerUrl && brokerUrl.trim()) {
     return { kind: "token_broker", brokerUrl: brokerUrl.trim() };
@@ -34,6 +29,11 @@ export function getCredentialStrategy(): CredentialStrategy {
 
   if (DEFAULT_URA_TOKEN_BROKER_URL) {
     return { kind: "token_broker", brokerUrl: DEFAULT_URA_TOKEN_BROKER_URL };
+  }
+
+  const accessKey = process.env.URA_ACCESS_KEY;
+  if (accessKey && accessKey.trim()) {
+    return { kind: "env_access_key", accessKey: accessKey.trim() };
   }
 
   return { kind: "unavailable" };

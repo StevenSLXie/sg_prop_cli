@@ -104,7 +104,7 @@ Mode detection:
 
 Credential strategy:
 
-- `URA_ACCESS_KEY` overrides maintained credentials in all modes for development, emergency rotation, and advanced users.
+- The maintained default proxy is preferred in all normal package modes. `URA_ACCESS_KEY` is a fallback only for forked/internal builds where no proxy URL is configured.
 - Token broker/proxy strategy keeps the URA `AccessKey` server-side and returns only a daily URA token or broker-scoped response to the local client.
 - Embedded `AccessKey` strategy is not the default. It may be used only for explicitly authorized controlled distributions because package contents are extractable.
 - `SG_HOUSING_DISTRIBUTION_MODE` may override mode for testing, but must not make URA tools available without credentials.
@@ -112,7 +112,7 @@ Credential strategy:
 Detailed URA tools:
 
 - `maintained`: available out of the box only when the approved credential strategy is healthy.
-- `development`: available only if `URA_ACCESS_KEY` or an approved local maintained provider exists.
+- `development`: available through the maintained default proxy when configured; direct `URA_ACCESS_KEY` is only a fallback for forked/internal builds without a proxy URL.
 - `public`: unavailable with friendly error `URA_REQUIRES_MAINTAINED_DISTRIBUTION`.
 
 ## 4. Shared Response Envelope
@@ -1191,7 +1191,7 @@ Global help must show:
   - HDB resale comparables;
   - private sale comparables;
   - CEA salesperson/transaction analysis;
-- note that detailed URA private tools require the maintained distribution or `URA_ACCESS_KEY` in development mode.
+- note that detailed URA private tools use the maintained proxy by default and do not require end-user credentials.
 
 Subcommand help must show:
 
@@ -1223,7 +1223,7 @@ Examples:
 
 Caveats:
   Not valuation advice. URA does not provide unit numbers; coordinates are project-level.
-  Detailed URA tools require the maintained distribution or URA_ACCESS_KEY in development mode.
+  Detailed URA tools use the maintained proxy by default and do not require end-user credentials.
 ```
 
 ### 10.2 Commands

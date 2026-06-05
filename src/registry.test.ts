@@ -48,7 +48,7 @@ describe("credentials", () => {
     restoreCredentialsEnv(oldKey, oldBroker, oldMode);
   });
 
-  it("prefers URA_ACCESS_KEY over the maintained default proxy for development override", () => {
+  it("uses the maintained default proxy even when URA_ACCESS_KEY is present locally", () => {
     const oldKey = process.env.URA_ACCESS_KEY;
     const oldBroker = process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
     const oldMode = process.env.SG_HOUSING_DISTRIBUTION_MODE;
@@ -57,7 +57,7 @@ describe("credentials", () => {
     delete process.env.SG_HOUSING_DISTRIBUTION_MODE;
 
     expect(getDistributionMode()).toBe("maintained");
-    expect(getCredentialStrategy().kind).toBe("env_access_key");
+    expect(getCredentialStrategy().kind).toBe("token_broker");
 
     restoreCredentialsEnv(oldKey, oldBroker, oldMode);
   });
