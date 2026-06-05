@@ -1,210 +1,150 @@
 # sg-housing-data
 
-Local CLI and MCP server for Singapore housing/property public data.
+Singapore housing/property data tools for AI agents.
 
-Use it from Claude Code, Codex CLI, or your terminal to query curated HDB, CEA, data.gov.sg, and URA private residential datasets. Detailed URA Data Service tools use the maintained Vercel URA proxy by default, so end users do not configure URA credentials and the npm package does not embed a URA access key.
+This package provides a local MCP server for Claude Desktop, Claude Code, Codex CLI, and other MCP clients. It exposes curated HDB, CEA, data.gov.sg, and URA private residential data through bounded, agent-friendly tools.
+
+Detailed URA private residential tools work out of the box through a maintained Vercel proxy. End users do not configure URA credentials, and the npm package does not embed a URA access key.
 
 ## Install
 
-Requirements:
-
-- Node.js 20 or newer.
-- npm.
-
-Install globally:
+Install the latest package:
 
 ```bash
-npm install -g sg-housing-data
+npm install -g sg-housing-data@latest
 ```
 
-Check that the CLI is available:
+Optional health check:
 
 ```bash
-sg-housing --help
 sg-housing doctor --mcp --json
 ```
 
-The expected `doctor` result should include:
+Expected result:
 
-- `distribution_mode: "maintained"`
-- `ura_credentials` status `ok`
-- `mcp_stdio` status `ok`
+- `distribution_mode` is `maintained`
+- `ura_credentials` is `ok`
+- `mcp_stdio` is `ok`
 
-Run a small smoke query:
+## Claude Desktop
 
-```bash
-sg-housing private sales \
-  --project TURQUOISE \
-  --district 04 \
-  --limit 1 \
-  --select project,district,contract_month,price,price_psf \
-  --json
+Claude Desktop uses `claude_desktop_config.json`.
+
+Open Claude Desktop, then go to:
+
+```text
+Settings -> Developer -> Edit Config
 ```
 
-## CLI Usage
+Add this server:
 
-List available sources:
-
-```bash
-sg-housing sources --json
-sg-housing sources --category ura --include-fields --json
+```json
+{
+  "mcpServers": {
+    "sg-housing": {
+      "command": "npx",
+      "args": ["-y", "sg-housing-data@latest", "mcp"]
+    }
+  }
+}
 ```
 
-Query compact rows from a public data.gov.sg-backed source:
+Config file locations:
 
-```bash
-sg-housing rows \
-  --source cea_residential_transactions \
-  --filter town=YISHUN \
-  --limit 5 \
-  --json
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\\Claude\\claude_desktop_config.json`
+
+After saving the file, fully quit and restart Claude Desktop. The MCP indicator should show `sg-housing`.
+
+Try:
+
+```text
+Use sg-housing to check recent 5-room HDB resale transactions in Bukit Merah.
 ```
 
-Range filters can be written as JSON:
-
-```bash
-sg-housing rows \
-  --source hdb_resale_transactions \
-  --filters-json '{"town":"BUKIT MERAH","flat_type":"5 ROOM","month":{"gte":"2026-01"}}' \
-  --select month,block,street_name,storey_range,floor_area_sqm,remaining_lease,resale_price \
-  --limit 20 \
-  --json
+```text
+Use sg-housing to find recent D'LEEDON private sale comparables and summarize price PSF.
 ```
-
-MCP agents may also use suffix filters such as `month_gte` and `resale_price_lte`.
-
-Run bounded local aggregation:
-
-```bash
-sg-housing aggregate \
-  --source cea_residential_transactions \
-  --operation top_n_by_count \
-  --group-by salesperson_reg_num,salesperson_name \
-  --filter town="ANG MO KIO" \
-  --top-n 10 \
-  --json
-```
-
-Query private residential sale comparables through the maintained URA proxy:
-
-```bash
-sg-housing private sales \
-  --project TURQUOISE \
-  --district 04 \
-  --limit 5 \
-  --json
-```
-
-Every row command is bounded by default and returns compact fields unless you explicitly request more.
 
 ## Claude Code
 
-Claude Code supports local stdio MCP servers via `claude mcp add`. Add this server globally for your user:
+Add the MCP server at user scope:
 
 ```bash
-claude mcp add --transport stdio --scope user sg-housing -- sg-housing mcp
+claude mcp add --transport stdio --scope user sg-housing -- npx -y sg-housing-data@latest mcp
 ```
 
-Verify from your shell:
+Verify:
 
 ```bash
 claude mcp list
 ```
 
-Then open Claude Code and run:
+Inside Claude Code, run:
 
 ```text
 /mcp
-```
-
-You should see `sg-housing` connected with its tools.
-
-Example prompts:
-
-```text
-Use sg-housing to find recent private sale comparables for TURQUOISE in district 04.
-```
-
-```text
-Use sg-housing to rank CEA salespersons by HDB resale transaction count in Ang Mo Kio, then fetch a few evidence rows.
 ```
 
 Project-scoped alternative:
 
 ```bash
-claude mcp add --transport stdio --scope project sg-housing -- sg-housing mcp
+claude mcp add --transport stdio --scope project sg-housing -- npx -y sg-housing-data@latest mcp
 ```
-
-Claude Code will create or update a project `.mcp.json`. Commit that file only if your team wants the same MCP server enabled for the project.
 
 ## Codex CLI
 
-Codex CLI can register MCP servers with `codex mcp add`:
+Add the MCP server:
 
 ```bash
-codex mcp add sg-housing -- sg-housing mcp
+codex mcp add sg-housing -- npx -y sg-housing-data@latest mcp
 codex mcp list
 ```
 
-If you prefer editing the Codex config directly, add this to `~/.codex/config.toml`:
+Or edit `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.sg-housing]
-command = "sg-housing"
-args = ["mcp"]
+command = "npx"
+args = ["-y", "sg-housing-data@latest", "mcp"]
+enabled = true
+startup_timeout_sec = 30
+tool_timeout_sec = 120
 ```
 
-Restart Codex after editing the config. In a Codex session, use the MCP status command if available:
+Restart Codex after changing the config.
+
+## What It Can Answer
+
+Examples:
 
 ```text
-/mcp
+Bukit Merah recent 5-room HDB resale prices, with median and example rows.
 ```
-
-Example prompt:
 
 ```text
-Use the sg-housing MCP tools to compare private residential sale transactions for TURQUOISE, returning only a compact summary and a few evidence rows.
+D'LEEDON recent private sale transactions, summarized by area and price PSF.
 ```
-
-## Zero-Config URA Access
-
-The package calls the maintained proxy by default:
 
 ```text
-https://sg-housing-data-mcp-spec.vercel.app/api/ura
+Find CEA salesperson R060096F and summarize public CEA transaction activity.
 ```
 
-The URA `AccessKey` is stored only as a Vercel environment variable. The local CLI/MCP sends allowed URA service requests to the proxy and receives URA JSON responses. The proxy handles daily URA token generation and refresh.
+Notes:
 
-Maintainer override for a different proxy:
+- HDB and CEA data come from public data.gov.sg sources.
+- URA private residential transaction tools use the maintained proxy by default.
+- CEA transaction records do not include transaction prices.
+- URA private sale records do not include unit numbers; coordinates are project-level.
+- Results are not valuation advice.
 
-```bash
-SG_HOUSING_URA_TOKEN_BROKER_URL=https://your-proxy.example.com/api/ura sg-housing doctor --mcp --json
-```
+## Maintainers
 
-End users should not set `URA_ACCESS_KEY`.
-
-## Updates
-
-Check whether a newer npm package is available:
+Release checks:
 
 ```bash
-sg-housing update-check --json
-```
-
-`sg-housing doctor --json` also includes a non-blocking update check, cached for 24 hours. Disable update checks in locked-down environments:
-
-```bash
-SG_HOUSING_DISABLE_UPDATE_CHECK=1 sg-housing doctor --json
-```
-
-## Development
-
-```bash
-npm install
 npm run prepublishOnly
-node dist/cli.js --help
-node dist/cli.js doctor --mcp --json
+npm pack --dry-run
 ```
 
 Vercel proxy details are in [docs/VERCEL_PROXY.md](docs/VERCEL_PROXY.md). npm release steps are in [docs/NPM_RELEASE.md](docs/NPM_RELEASE.md).
