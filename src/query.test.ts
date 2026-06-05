@@ -11,7 +11,9 @@ describe("row filters", () => {
     expect(rowMatchesFilters(row, { town: ["BISHAN", "ANG MO KIO"] })).toBe(true);
     expect(rowMatchesFilters(row, { project: { op: "contains", value: "minton" } })).toBe(true);
     expect(rowMatchesFilters(row, { price_psf: { gte: 2000, lte: 2200 } })).toBe(true);
+    expect(rowMatchesFilters(row, { price_psf_gte: 2000, price_psf_lte: 2200 })).toBe(true);
     expect(rowMatchesFilters(row, { price_psf: { gte: 2201 } })).toBe(false);
+    expect(rowMatchesFilters(row, { price_psf_gte: 2201 })).toBe(false);
   });
 
   it("rejects invalid in value shape", () => {
@@ -27,6 +29,34 @@ describe("row filters", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("accepts agent-style _gte and _lte filter suffixes through query validation", async () => {
+    const fakeClient = {
+      async searchRows() {
+        return {
+          records: [
+            { quarter: "2023-Q4", town: "A", flat_type: "4 ROOM", price: "1" },
+            { quarter: "2024-Q1", town: "B", flat_type: "4 ROOM", price: "2" },
+            { quarter: "2024-Q2", town: "C", flat_type: "4 ROOM", price: "3" }
+          ],
+          total: 3,
+          resource_id: "test"
+        };
+      }
+    };
+    const result = await queryHousingRows(
+      {
+        source: "hdb_median_resale",
+        filters: { quarter_gte: "2024-Q1", quarter_lte: "2024-Q2" },
+        select: ["quarter", "town", "price"],
+        limit: 10
+      },
+      fakeClient as never
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.rows.map((row) => row.quarter)).toEqual(["2024-Q1", "2024-Q2"]);
   });
 
   it("normalizes numeric fields", () => {

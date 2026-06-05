@@ -9,7 +9,13 @@ export type NormalizedFilter = {
 export function normalizeFilters(filters: HousingFilters | undefined): NormalizedFilter[] {
   if (!filters) return [];
 
-  return Object.entries(filters).flatMap(([fieldName, condition]) => {
+  return Object.entries(filters).flatMap(([rawFieldName, condition]) => {
+    const suffix = suffixOperator(rawFieldName);
+    const fieldName = suffix ? rawFieldName.slice(0, -`_${suffix}`.length) : rawFieldName;
+    if (suffix) {
+      return [{ field: fieldName, op: suffix, value: condition as string | number | boolean | Array<string | number | boolean> }];
+    }
+
     if (Array.isArray(condition)) {
       return [{ field: fieldName, op: "in" as const, value: condition }];
     }
@@ -37,6 +43,13 @@ export function validateFilters(fields: FieldCatalogEntry[], filters: HousingFil
   const errors: string[] = [];
   const catalog = new Map(fields.map((field) => [field.name, field]));
   for (const [fieldName, condition] of Object.entries(filters ?? {})) {
+    const suffix = suffixOperator(fieldName);
+    if (suffix) {
+      if (Array.isArray(condition) || (typeof condition === "object" && condition !== null)) {
+        errors.push(`Suffix filter '${fieldName}' requires a single value.`);
+      }
+      continue;
+    }
     if (Array.isArray(condition) || typeof condition !== "object" || condition === null) continue;
     if ("op" in condition) {
       if (!("value" in condition) || condition.value === undefined || condition.value === null) {
@@ -65,6 +78,12 @@ export function validateFilters(fields: FieldCatalogEntry[], filters: HousingFil
     }
   }
   return errors;
+}
+
+function suffixOperator(fieldName: string): "gte" | "lte" | null {
+  if (fieldName.endsWith("_gte")) return "gte";
+  if (fieldName.endsWith("_lte")) return "lte";
+  return null;
 }
 
 export function coerceComparable(value: unknown): string | number | boolean | null {

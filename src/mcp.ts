@@ -68,7 +68,7 @@ export function createMcpServer(): McpServer {
     {
       title: "Query housing rows",
       description:
-        "Return a small, bounded page of normalized compact rows from a curated housing source such as HDB resale transactions, CEA residential transactions, or URA summary datasets. Use for source evidence with filters, select, limits, scan caps, and cursors. Not for unbounded full-table scans.",
+        "Return a small, bounded page of normalized compact rows from a curated housing source such as HDB resale transactions, CEA residential transactions, or URA summary datasets. Use for source evidence with filters, select, limits, scan caps, and cursors. Filters use field names with values for equality, arrays for in, {op:'contains'|'gte'|'lte',value}, or {gte,lte}; common suffixes like month_gte and resale_price_lte are also accepted. Not for unbounded full-table scans.",
       inputSchema: {
         source: sourceKeySchema,
         filters: filtersSchema,
@@ -88,7 +88,7 @@ export function createMcpServer(): McpServer {
     {
       title: "Aggregate housing rows",
       description:
-        "Run bounded local aggregations over curated data.gov.sg housing sources: count, grouped count, top-N by count, or numeric summary. Use for questions like top CEA salespersons by town before fetching evidence rows. Returns completeness metadata and refuses authoritative partial rankings unless allow_partial is set.",
+        "Run bounded local aggregations over curated data.gov.sg housing sources: count, grouped count, top-N by count, or numeric summary. Use for questions like top CEA salespersons by town before fetching evidence rows. Filters use the same syntax as query_housing_rows, including _gte/_lte suffix compatibility. Returns completeness metadata and refuses authoritative partial rankings unless allow_partial is set.",
       inputSchema: {
         source: sourceKeySchema,
         filters: filtersSchema,

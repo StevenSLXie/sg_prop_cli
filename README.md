@@ -60,6 +60,19 @@ sg-housing rows \
   --json
 ```
 
+Range filters can be written as JSON:
+
+```bash
+sg-housing rows \
+  --source hdb_resale_transactions \
+  --filters-json '{"town":"BUKIT MERAH","flat_type":"5 ROOM","month":{"gte":"2026-01"}}' \
+  --select month,block,street_name,storey_range,floor_area_sqm,remaining_lease,resale_price \
+  --limit 20 \
+  --json
+```
+
+MCP agents may also use suffix filters such as `month_gte` and `resale_price_lte`.
+
 Run bounded local aggregation:
 
 ```bash
