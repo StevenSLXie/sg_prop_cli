@@ -68,7 +68,7 @@ export function createMcpServer(): McpServer {
     {
       title: "Query housing rows",
       description:
-        "Return a small, bounded page of normalized compact rows from a curated housing source such as HDB resale transactions, CEA residential transactions, or URA summary datasets. Use for source evidence with filters, select, limits, scan caps, and cursors. Filters use field names with values for equality, arrays for in, {op:'contains'|'gte'|'lte',value}, or {gte,lte}; common suffixes like month_gte and resale_price_lte are also accepted. Not for unbounded full-table scans.",
+        "Return a small, bounded page of normalized compact rows from a curated housing source such as HDB resale transactions, CEA residential transactions, or URA summary datasets. Use for source evidence rows after narrowing with filters. For HDB resale recent-month evidence, prefer exact street_name/town/flat_type plus month_gte; common HDB street suffixes like Road->RD and Avenue->AVE are normalized before data.gov.sg filter pushdown, and recent rows are scanned first. Filters use field names with values for equality, arrays for in, {op:'contains'|'gte'|'lte',value}, or {gte,lte}; suffixes like month_gte and resale_price_lte are accepted. Not for unbounded full-table scans.",
       inputSchema: {
         source: sourceKeySchema,
         filters: filtersSchema,
@@ -88,7 +88,7 @@ export function createMcpServer(): McpServer {
     {
       title: "Aggregate housing rows",
       description:
-        "Run bounded local aggregations over curated data.gov.sg housing sources: count, grouped count, top-N by count, or numeric summary. Use for questions like top CEA salespersons by town before fetching evidence rows. Filters use the same syntax as query_housing_rows, including _gte/_lte suffix compatibility. Returns completeness metadata and refuses authoritative partial rankings unless allow_partial is set.",
+        "Run bounded local aggregations over curated data.gov.sg housing sources: count, grouped count, top-N by count, or numeric summary. Use this before fetching rows for average, median, min/max, count, top-N, or 'by field' questions. numeric_summary supports group_by and returns capped grouped summaries using top_n. For HDB resale questions like average price by remaining lease, filter exact street_name/town/flat_type plus month_gte, group by remaining_lease_months or remaining_lease, and value_field resale_price. HDB street suffixes like Road->RD are normalized, exact filters are pushed to data.gov.sg, and recent HDB resale scans use newest records first. Returns completeness metadata and refuses authoritative partial rankings unless allow_partial is set.",
       inputSchema: {
         source: sourceKeySchema,
         filters: filtersSchema,
@@ -134,7 +134,7 @@ export function createMcpServer(): McpServer {
     {
       title: "Find private residential sale comparables",
       description:
-        "Find a compact, bounded set of URA Data Service private residential sale transaction rows from the past 5 years. Use for condo, apartment, EC, or landed comparable sale questions by project, district, market segment, sale type, date, area, price, or PSF. Requires an approved URA credential strategy. Not valuation advice; no unit number and coordinates are project-level.",
+        "Find a compact, bounded set of URA Data Service private residential sale transaction rows from the past 5 years. Use for condo, apartment, EC, or landed comparable sale questions by project, district, market segment, sale type, date, area, price, or PSF. For buyer shortlist questions like 'D18, budget 1.6-2.2m, 900-1200 sqft', convert sqft to sqm, set district/min_price/max_price/min_area_sqm/max_area_sqm, use output_mode='summary' or 'both', and read the capped project_summaries before fetching more rows. This tool calls URA batches, not data.gov.sg row scans, so it does not use the data.gov.sg pagination path. Requires an approved URA credential strategy. Not valuation advice; no unit number and coordinates are project-level.",
       inputSchema: privateSaleSchema()
     },
     async (args) => toolResult(await findPrivateResidentialSaleComparables(args))

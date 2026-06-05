@@ -76,14 +76,14 @@ program
 
 program
   .command("aggregate")
-  .description("Run bounded local aggregation over a curated data.gov.sg source.")
+  .description("Run bounded filtered aggregation over a curated data.gov.sg source.")
   .requiredOption("--source <source>", "source key")
   .requiredOption("--operation <operation>", "count, group_count, top_n_by_count, numeric_summary")
   .option("--filter <key=value>", "simple equality filter; repeatable", collect, [])
   .option("--filters-json <json>", "advanced filters JSON with operators")
-  .option("--group-by <fields>", "comma-separated group fields")
-  .option("--value-field <field>", "numeric value field for numeric_summary")
-  .option("--top-n <number>", "top-N output size, default 10, max 50", parseInteger)
+  .option("--group-by <fields>", "comma-separated group fields; numeric_summary supports grouped summaries")
+  .option("--value-field <field>", "numeric value field for numeric_summary, such as resale_price")
+  .option("--top-n <number>", "top-N output size or grouped numeric summary cap, default 10, max 50", parseInteger)
   .option("--limit-rows-scanned <number>", "scan cap, default 5000, max 20000", parseInteger)
   .option("--cursor <cursor>", "opaque aggregation cursor")
   .option("--allow-partial", "allow partial top-N rankings")

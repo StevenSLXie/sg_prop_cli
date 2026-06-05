@@ -1,7 +1,8 @@
 import { DataGovClient, DataGovError } from "./datagov-client.js";
+import { exactServerFilters, normalizeDataGovFilterValues, planDataGovScan } from "./datagov-planner.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
 import { baseMeta, fail, ok, sourceAttribution } from "./envelope.js";
-import { normalizeFilters, resolveFilterAliases, rowMatchesFilters, validateFilters } from "./filters.js";
+import { resolveFilterAliases, rowMatchesFilters, validateFilters } from "./filters.js";
 import { compactFields, requireSource, resolveFieldNames } from "./registry.js";
 import type { HousingFilters, ResultEnvelope, SourceKey } from "./types.js";
 
@@ -75,6 +76,7 @@ export async function queryHousingRows(
 
   const source = requireSource(sourceKey);
   filters = resolveFilterAliases(source.fields, filters);
+  filters = normalizeDataGovFilterValues(source.source_key, filters);
   select = select ? resolveFieldNames(source.fields, select) : select;
   if (source.backend !== "data_gov_sg") {
     return fail(
@@ -111,12 +113,13 @@ export async function queryHousingRows(
   }
 
   const datasetIds = source.dataset_ids ?? [];
-  if (datasetIds.length === 0) {
+  const scanPlan = planDataGovScan(source.source_key, datasetIds, filters);
+  if (scanPlan.datasetIds.length === 0) {
     return fail(tool, "SOURCE_UNAVAILABLE", `${source.source_key} has no dataset id configured.`, "Use another source.", {
       affected_sources: [source.source_key]
     });
   }
-  if (datasetIndex >= datasetIds.length) {
+  if (datasetIndex >= scanPlan.datasetIds.length) {
     return fail(tool, "VALIDATION_ERROR", "Invalid cursor dataset index.", "Use a cursor returned by this tool for the same source.", {
       affected_sources: [source.source_key]
     });
@@ -130,7 +133,7 @@ export async function queryHousingRows(
   let complete = true;
 
   try {
-    outer: for (let i = datasetIndex; i < datasetIds.length; i++) {
+    outer: for (let i = datasetIndex; i < scanPlan.datasetIds.length; i++) {
       let currentOffset = i === datasetIndex ? offset : 0;
       for (;;) {
         if (pagesScanned - previousPagesScanned >= maxPages || rowsScanned - previousRowsScanned >= maxRowsScanned) {
@@ -151,24 +154,29 @@ export async function queryHousingRows(
 
         const remainingScanRows = maxRowsScanned - (rowsScanned - previousRowsScanned);
         const response = await client.searchRows({
-          resourceId: datasetIds[i]!,
+          resourceId: scanPlan.datasetIds[i]!,
           limit: Math.min(PAGE_SIZE, remainingScanRows),
           offset: currentOffset,
-          filters: exactServerFilters(filters)
+          filters: exactServerFilters(source.source_key, filters),
+          sort: scanPlan.sort
         });
         pagesScanned += 1;
         backendTotal = response.total;
         rowsScanned += response.records.length;
+        let shouldStopAfterPage = false;
 
         for (let rawIndex = 0; rawIndex < response.records.length; rawIndex++) {
           const rawRow = response.records[rawIndex]!;
           const normalized = normalizeRow(rawRow, source.fields);
+          if (scanPlan.stopAfterFieldBelow && isBelowStopValue(normalized, scanPlan.stopAfterFieldBelow)) {
+            shouldStopAfterPage = true;
+          }
           if (!rowMatchesFilters(normalized, filters)) continue;
           rows.push(projectRow(normalized, rawRow, selectedFields, includeRaw));
           if (rows.length >= limit) {
             const nextOffset = currentOffset + rawIndex + 1;
             const hasMoreInDataset = response.total === null || nextOffset < response.total;
-            if (hasMoreInDataset || i + 1 < datasetIds.length) {
+            if (!shouldStopAfterPage && (hasMoreInDataset || i + 1 < scanPlan.datasetIds.length)) {
               nextCursor = encodeCursor({
                 kind: "row",
                 source: source.source_key,
@@ -186,6 +194,7 @@ export async function queryHousingRows(
         }
 
         currentOffset += response.records.length;
+        if (shouldStopAfterPage) break outer;
         if (response.records.length === 0 || (response.total !== null && currentOffset >= response.total)) {
           break;
         }
@@ -205,7 +214,7 @@ export async function queryHousingRows(
     tool,
     { rows },
     {
-      ...baseMeta([source.source_key], [sourceAttribution(source, datasetIds[datasetIndex])], source.caveats),
+      ...baseMeta([source.source_key], [sourceAttribution(source, scanPlan.datasetIds[datasetIndex])], source.caveats),
       rows_returned: rows.length,
       rows_scanned: rowsScanned,
       pages_scanned: pagesScanned,
@@ -225,6 +234,9 @@ export function normalizeRow(row: Record<string, unknown>, fields: { name: strin
     const value = Number(String(normalized[field]).replace(/,/g, ""));
     normalized[field] = Number.isNaN(value) ? null : value;
   }
+  if ("remaining_lease" in normalized && !("remaining_lease_months" in normalized)) {
+    normalized.remaining_lease_months = parseRemainingLeaseMonths(normalized.remaining_lease);
+  }
   return normalized;
 }
 
@@ -242,22 +254,23 @@ function projectRow(
   return projected;
 }
 
-function exactServerFilters(filters: HousingFilters | undefined): Record<string, string | number | Array<string | number>> | undefined {
-  const serverFilters: Record<string, string | number | Array<string | number>> = {};
-  for (const filter of normalizeFilters(filters)) {
-    if (filter.op !== "eq" && filter.op !== "in") continue;
-    if (typeof filter.value === "boolean") continue;
-    if (Array.isArray(filter.value)) {
-      const values = filter.value.filter((value): value is string | number => typeof value !== "boolean");
-      if (values.length > 0) serverFilters[filter.field] = values;
-    } else {
-      serverFilters[filter.field] = filter.value;
-    }
-  }
-  return Object.keys(serverFilters).length > 0 ? serverFilters : undefined;
-}
-
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, Math.floor(value)));
+}
+
+function parseRemainingLeaseMonths(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const text = String(value).toLowerCase();
+  if (/^\d+(\.\d+)?$/.test(text.trim())) return Math.round(Number(text.trim()) * 12);
+  const years = /(\d+)\s*years?/.exec(text)?.[1];
+  const months = /(\d+)\s*months?/.exec(text)?.[1];
+  if (!years && !months) return null;
+  return (years ? Number.parseInt(years, 10) * 12 : 0) + (months ? Number.parseInt(months, 10) : 0);
+}
+
+function isBelowStopValue(row: Record<string, unknown>, stop: { field: string; value: string }): boolean {
+  const actual = row[stop.field];
+  if (actual === null || actual === undefined) return false;
+  return String(actual) < stop.value;
 }

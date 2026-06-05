@@ -60,7 +60,8 @@ export const SOURCES: SourceDefinition[] = [
       field("flat_model", "string", ["eq", "in"], { default_selected: true, compact_priority: 8 }),
       field("lease_commence_date", "number", ["eq", "gte", "lte"]),
       field("remaining_lease", "string", ["contains"]),
-      field("resale_price", "number", ["eq", "gte", "lte"], { default_selected: true, compact_priority: 9 })
+      field("remaining_lease_months", "number", ["eq", "gte", "lte"], { default_selected: true, compact_priority: 9 }),
+      field("resale_price", "number", ["eq", "gte", "lte"], { default_selected: true, compact_priority: 10 })
     ]
   },
   {

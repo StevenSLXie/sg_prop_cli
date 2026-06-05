@@ -46,6 +46,15 @@ describe("URA private sale tool", () => {
     expect(result.data.rows?.[0]?.raw).toBeUndefined();
     expect(result.data.summary?.sample_size).toBe(1);
     expect(result.data.summary?.by_type_of_sale).toEqual({ resale: 1 });
+    expect(result.data.summary?.project_summaries).toEqual([
+      expect.objectContaining({
+        project: "TURQUOISE",
+        street: "COVE DRIVE",
+        district: "04",
+        count: 1,
+        price_median: 2000000
+      })
+    ]);
   });
 
   it("rejects include_raw with large limit", async () => {

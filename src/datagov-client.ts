@@ -3,6 +3,7 @@ export type DatastoreSearchParams = {
   limit: number;
   offset?: number;
   filters?: Record<string, string | number | Array<string | number>>;
+  sort?: string;
 };
 
 export type DatastoreSearchResult = {
@@ -21,6 +22,9 @@ export class DataGovClient {
     url.searchParams.set("offset", String(params.offset ?? 0));
     if (params.filters && Object.keys(params.filters).length > 0) {
       url.searchParams.set("filters", JSON.stringify(params.filters));
+    }
+    if (params.sort) {
+      url.searchParams.set("sort", params.sort);
     }
 
     const response = await fetch(url, {

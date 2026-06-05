@@ -79,7 +79,8 @@ export async function findPrivateResidentialSaleComparables(
         area_sqm: numericSummary(rows.map((row) => Number(row.area_sqm)).filter(Number.isFinite)),
         by_type_of_sale: countBy(rows, "type_of_sale"),
         by_property_type: countBy(rows, "property_type"),
-        by_district: countBy(rows, "district")
+        by_district: countBy(rows, "district"),
+        project_summaries: groupedNumericSummaries(rows, "project", ["street", "district", "market_segment"], 12)
       },
       batches.length
     );
@@ -201,6 +202,44 @@ async function simpleUraRows(
   } catch (error) {
     return uraFailure(tool, sourceKey, error);
   }
+}
+
+function groupedNumericSummaries(
+  rows: Record<string, unknown>[],
+  groupField: string,
+  carryFields: string[],
+  limit: number
+): Record<string, unknown>[] {
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const row of rows) {
+    const key = String(row[groupField] ?? "unknown");
+    const current = groups.get(key) ?? [];
+    current.push(row);
+    groups.set(key, current);
+  }
+  return [...groups.entries()]
+    .map(([key, groupRows]) => {
+      const first = groupRows[0] ?? {};
+      return {
+        [groupField]: key,
+        ...Object.fromEntries(carryFields.map((field) => [field, first[field] ?? null])),
+        count: groupRows.length,
+        ...flattenSummary("price", numericSummary(groupRows.map((row) => Number(row.price)).filter(Number.isFinite))),
+        ...flattenSummary("price_psf", numericSummary(groupRows.map((row) => Number(row.price_psf)).filter(Number.isFinite))),
+        ...flattenSummary("area_sqm", numericSummary(groupRows.map((row) => Number(row.area_sqm)).filter(Number.isFinite)))
+      };
+    })
+    .sort((a, b) => Number(b.count ?? 0) - Number(a.count ?? 0))
+    .slice(0, limit);
+}
+
+function flattenSummary(prefix: string, summary: ReturnType<typeof numericSummary>): Record<string, number | null> {
+  return {
+    [`${prefix}_min`]: summary.min,
+    [`${prefix}_max`]: summary.max,
+    [`${prefix}_avg`]: summary.avg,
+    [`${prefix}_median`]: summary.median
+  };
 }
 
 function flattenSaleRows(payload: unknown, batch: number): Record<string, unknown>[] {

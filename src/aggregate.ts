@@ -1,4 +1,5 @@
 import { DataGovClient, DataGovError } from "./datagov-client.js";
+import { exactServerFilters, normalizeDataGovFilterValues, planDataGovScan } from "./datagov-planner.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
 import { baseMeta, fail, ok, sourceAttribution } from "./envelope.js";
 import { resolveFilterAliases, rowMatchesFilters, validateFilters } from "./filters.js";
@@ -26,7 +27,7 @@ export type AggregateHousingRowsInput = {
 
 type AggregateState = {
   count: number;
-  groups: Record<string, { key: Record<string, unknown>; count: number }>;
+  groups: Record<string, { key: Record<string, unknown>; count: number; values: number[] }>;
   values: number[];
 };
 
@@ -88,6 +89,7 @@ export async function aggregateHousingRows(
 
   const source = requireSource(sourceKey);
   filters = resolveFilterAliases(source.fields, filters);
+  filters = normalizeDataGovFilterValues(source.source_key, filters);
   if (!OPERATIONS.has(operation)) {
     return fail(tool, "VALIDATION_ERROR", `Invalid operation '${operation}'.`, "Use count, group_count, top_n_by_count, or numeric_summary.", {
       affected_sources: [source.source_key],
@@ -121,7 +123,8 @@ export async function aggregateHousingRows(
   }
 
   const datasetIds = source.dataset_ids ?? [];
-  if (datasetIndex >= datasetIds.length) {
+  const scanPlan = planDataGovScan(source.source_key, datasetIds, filters);
+  if (datasetIndex >= scanPlan.datasetIds.length) {
     return fail(tool, "VALIDATION_ERROR", "Invalid cursor dataset index.", "Use a cursor returned by this tool for the same source.", {
       affected_sources: [source.source_key]
     });
@@ -134,7 +137,7 @@ export async function aggregateHousingRows(
   let backendTotal: number | null = null;
 
   try {
-    outer: for (let i = datasetIndex; i < datasetIds.length; i++) {
+    outer: for (let i = datasetIndex; i < scanPlan.datasetIds.length; i++) {
       let currentOffset = i === datasetIndex ? offset : 0;
       for (;;) {
         if (rowsScanned - scanStartRows >= scanLimit) {
@@ -156,21 +159,28 @@ export async function aggregateHousingRows(
         }
         const remainingScanRows = scanLimit - (rowsScanned - scanStartRows);
         const response = await client.searchRows({
-          resourceId: datasetIds[i]!,
+          resourceId: scanPlan.datasetIds[i]!,
           limit: Math.min(PAGE_SIZE, remainingScanRows),
-          offset: currentOffset
+          offset: currentOffset,
+          filters: exactServerFilters(source.source_key, filters),
+          sort: scanPlan.sort
         });
         pagesScanned += 1;
         backendTotal = response.total;
         rowsScanned += response.records.length;
+        let shouldStopAfterPage = false;
 
         for (const rawRow of response.records) {
           const row = normalizeRow(rawRow, source.fields);
+          if (scanPlan.stopAfterFieldBelow && isBelowStopValue(row, scanPlan.stopAfterFieldBelow)) {
+            shouldStopAfterPage = true;
+          }
           if (!rowMatchesFilters(row, filters)) continue;
           consume(row, operation, groupBy, valueField, state);
         }
 
         currentOffset += response.records.length;
+        if (shouldStopAfterPage) break outer;
         if (response.records.length === 0 || (response.total !== null && currentOffset >= response.total)) {
           break;
         }
@@ -192,7 +202,7 @@ export async function aggregateHousingRows(
       partial: {
         data: materialize(operation, state, topN),
         meta: {
-          ...baseMeta([source.source_key], [sourceAttribution(source, datasetIds[datasetIndex])], source.caveats),
+          ...baseMeta([source.source_key], [sourceAttribution(source, scanPlan.datasetIds[datasetIndex])], source.caveats),
           rows_scanned: rowsScanned,
           pages_scanned: pagesScanned,
           backend_total: backendTotal,
@@ -210,7 +220,7 @@ export async function aggregateHousingRows(
       partial: {
         data: materialize(operation, state, topN),
         meta: {
-          ...baseMeta([source.source_key], [sourceAttribution(source, datasetIds[datasetIndex])], source.caveats),
+          ...baseMeta([source.source_key], [sourceAttribution(source, scanPlan.datasetIds[datasetIndex])], source.caveats),
           rows_scanned: rowsScanned,
           pages_scanned: pagesScanned,
           backend_total: backendTotal,
@@ -229,7 +239,7 @@ export async function aggregateHousingRows(
       result: materialize(operation, state, topN)
     },
     {
-      ...baseMeta([source.source_key], [sourceAttribution(source, datasetIds[datasetIndex])], source.caveats),
+      ...baseMeta([source.source_key], [sourceAttribution(source, scanPlan.datasetIds[datasetIndex])], source.caveats),
       rows_scanned: rowsScanned,
       pages_scanned: pagesScanned,
       backend_total: backendTotal,
@@ -248,11 +258,16 @@ function consume(
   state: AggregateState
 ): void {
   state.count += 1;
-  if (operation === "group_count" || operation === "top_n_by_count") {
+  if (operation === "group_count" || operation === "top_n_by_count" || (operation === "numeric_summary" && groupBy.length > 0)) {
     const keyObject = Object.fromEntries(groupBy.map((field) => [field, row[field] ?? null]));
     const key = JSON.stringify(keyObject);
-    state.groups[key] ??= { key: keyObject, count: 0 };
+    state.groups[key] ??= { key: keyObject, count: 0, values: [] };
+    state.groups[key].values ??= [];
     state.groups[key].count += 1;
+    if (operation === "numeric_summary" && valueField) {
+      const value = row[valueField];
+      if (typeof value === "number" && Number.isFinite(value)) state.groups[key].values.push(value);
+    }
   }
   if (operation === "numeric_summary" && valueField) {
     const value = row[valueField];
@@ -267,6 +282,12 @@ function materialize(operation: AggregateHousingRowsInput["operation"], state: A
       .sort((a, b) => b.count - a.count)
       .slice(0, operation === "top_n_by_count" ? topN : undefined)
       .map((entry) => ({ ...entry.key, count: entry.count }));
+  }
+  if (Object.keys(state.groups).length > 0) {
+    return Object.values(state.groups)
+      .map((entry) => ({ ...entry.key, ...numericSummary(entry.values) }))
+      .sort((a, b) => Number(b.count ?? 0) - Number(a.count ?? 0))
+      .slice(0, topN);
   }
   return numericSummary(state.values);
 }
@@ -304,4 +325,10 @@ function clamp(value: number, min: number, max: number): number {
 function boundedCursor(payload: Record<string, unknown>): string | null {
   const cursor = encodeCursor(payload);
   return cursor.length <= MAX_CURSOR_CHARS ? cursor : null;
+}
+
+function isBelowStopValue(row: Record<string, unknown>, stop: { field: string; value: string }): boolean {
+  const actual = row[stop.field];
+  if (actual === null || actual === undefined) return false;
+  return String(actual) < stop.value;
 }
