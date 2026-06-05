@@ -61,7 +61,7 @@ describe("package update check", () => {
     });
 
     expect(result.source).toBe("network");
-    expect(result.current_version).toBe("0.1.0");
+    expect(result.current_version).toBe(PACKAGE_VERSION);
     expect(result.latest_version).toBe("0.2.0");
     expect(result.update_available).toBe(true);
     expect(result.next_action).toBe("Run npm install -g sg-housing-data@latest");
