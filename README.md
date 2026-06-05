@@ -6,6 +6,8 @@ Primary use case: run `sg-housing mcp` from Claude CLI and ask questions over cu
 
 Detailed URA Data Service tools require an approved credential strategy. For development, set `URA_ACCESS_KEY`. Public packages do not embed URA credentials.
 
+For a maintained zero-config release, deploy the Vercel URA proxy in [docs/VERCEL_PROXY.md](docs/VERCEL_PROXY.md) and set the proxy URL as the package default before publishing.
+
 ## Development
 
 ```bash
@@ -21,6 +23,10 @@ Set `SG_HOUSING_DISABLE_UPDATE_CHECK=1` to disable version checks in locked-down
 ## npm Release
 
 See [docs/NPM_RELEASE.md](docs/NPM_RELEASE.md).
+
+## URA Proxy
+
+See [docs/VERCEL_PROXY.md](docs/VERCEL_PROXY.md).
 
 ## Claude CLI
 

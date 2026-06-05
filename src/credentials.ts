@@ -1,5 +1,7 @@
 import type { DistributionMode } from "./types.js";
 
+const DEFAULT_URA_TOKEN_BROKER_URL = "";
+
 export type CredentialStrategy =
   | { kind: "env_access_key"; accessKey: string }
   | { kind: "token_broker"; brokerUrl: string }
@@ -11,6 +13,9 @@ export function getDistributionMode(): DistributionMode {
     return override;
   }
   if (process.env.SG_HOUSING_URA_TOKEN_BROKER_URL) {
+    return "maintained";
+  }
+  if (DEFAULT_URA_TOKEN_BROKER_URL) {
     return "maintained";
   }
   return process.env.NODE_ENV === "development" ? "development" : "public";
@@ -25,6 +30,10 @@ export function getCredentialStrategy(): CredentialStrategy {
   const brokerUrl = process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
   if (brokerUrl && brokerUrl.trim()) {
     return { kind: "token_broker", brokerUrl: brokerUrl.trim() };
+  }
+
+  if (DEFAULT_URA_TOKEN_BROKER_URL) {
+    return { kind: "token_broker", brokerUrl: DEFAULT_URA_TOKEN_BROKER_URL };
   }
 
   return { kind: "unavailable" };

@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/ura.ts": {
+      "maxDuration": 30
+    }
+  }
+}
