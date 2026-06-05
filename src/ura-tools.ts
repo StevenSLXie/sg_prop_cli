@@ -64,14 +64,25 @@ export async function findPrivateResidentialSaleComparables(
         rows.push(row);
       }
     }
-    return privateRowsOk("find_private_residential_sale_comparables", source.source_key, rows, rowsScanned, limit, input.output_mode, select, Boolean(input.include_raw), {
-      price: numericSummary(rows.map((row) => Number(row.price)).filter(Number.isFinite)),
-      price_psf: numericSummary(rows.map((row) => Number(row.price_psf)).filter(Number.isFinite)),
-      area_sqm: numericSummary(rows.map((row) => Number(row.area_sqm)).filter(Number.isFinite)),
-      by_type_of_sale: countBy(rows, "type_of_sale"),
-      by_property_type: countBy(rows, "property_type"),
-      by_district: countBy(rows, "district")
-    });
+    return privateRowsOk(
+      "find_private_residential_sale_comparables",
+      source.source_key,
+      rows,
+      rowsScanned,
+      limit,
+      input.output_mode,
+      select,
+      Boolean(input.include_raw),
+      {
+        price: numericSummary(rows.map((row) => Number(row.price)).filter(Number.isFinite)),
+        price_psf: numericSummary(rows.map((row) => Number(row.price_psf)).filter(Number.isFinite)),
+        area_sqm: numericSummary(rows.map((row) => Number(row.area_sqm)).filter(Number.isFinite)),
+        by_type_of_sale: countBy(rows, "type_of_sale"),
+        by_property_type: countBy(rows, "property_type"),
+        by_district: countBy(rows, "district")
+      },
+      batches.length
+    );
   } catch (error) {
     return uraFailure("find_private_residential_sale_comparables", source.source_key, error);
   }
@@ -133,7 +144,8 @@ function privateRowsOk(
   outputMode: "rows" | "summary" | "both" = "both",
   select: string[],
   includeRaw: boolean,
-  summary: Record<string, unknown>
+  summary: Record<string, unknown>,
+  batchesScanned?: number
 ): ResultEnvelope<{ rows?: Record<string, unknown>[]; summary?: Record<string, unknown> }> {
   const source = requireSource(sourceKey);
   const rows = allRows.slice(0, limit).map((row) => project(row, select, includeRaw));
@@ -146,7 +158,7 @@ function privateRowsOk(
     ...baseMeta([sourceKey], [sourceAttribution(source)], source.caveats),
     rows_returned: rows.length,
     rows_scanned: rowsScanned,
-    batches_scanned: sourceKey === "ura_private_residential_transactions" ? 4 : undefined,
+    batches_scanned: batchesScanned,
     complete: !rowTruncated,
     truncated: rowTruncated,
     next_cursor: null

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getDistributionMode } from "./credentials.js";
+import { getCredentialStrategy, getDistributionMode } from "./credentials.js";
 import { getSource, listSources, SOURCES } from "./registry.js";
 
 describe("registry", () => {
@@ -34,19 +34,40 @@ describe("registry", () => {
 });
 
 describe("credentials", () => {
-  it("does not treat URA_ACCESS_KEY alone as maintained distribution", () => {
+  it("uses the maintained default proxy when no explicit credential override is set", () => {
+    const oldKey = process.env.URA_ACCESS_KEY;
+    const oldBroker = process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
+    const oldMode = process.env.SG_HOUSING_DISTRIBUTION_MODE;
+    delete process.env.URA_ACCESS_KEY;
+    delete process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
+    delete process.env.SG_HOUSING_DISTRIBUTION_MODE;
+
+    expect(getDistributionMode()).toBe("maintained");
+    expect(getCredentialStrategy().kind).toBe("token_broker");
+
+    restoreCredentialsEnv(oldKey, oldBroker, oldMode);
+  });
+
+  it("prefers URA_ACCESS_KEY over the maintained default proxy for development override", () => {
     const oldKey = process.env.URA_ACCESS_KEY;
     const oldBroker = process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
     const oldMode = process.env.SG_HOUSING_DISTRIBUTION_MODE;
     process.env.URA_ACCESS_KEY = "test";
     delete process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
     delete process.env.SG_HOUSING_DISTRIBUTION_MODE;
-    expect(getDistributionMode()).not.toBe("maintained");
-    if (oldKey === undefined) delete process.env.URA_ACCESS_KEY;
-    else process.env.URA_ACCESS_KEY = oldKey;
-    if (oldBroker === undefined) delete process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
-    else process.env.SG_HOUSING_URA_TOKEN_BROKER_URL = oldBroker;
-    if (oldMode === undefined) delete process.env.SG_HOUSING_DISTRIBUTION_MODE;
-    else process.env.SG_HOUSING_DISTRIBUTION_MODE = oldMode;
+
+    expect(getDistributionMode()).toBe("maintained");
+    expect(getCredentialStrategy().kind).toBe("env_access_key");
+
+    restoreCredentialsEnv(oldKey, oldBroker, oldMode);
   });
 });
+
+function restoreCredentialsEnv(oldKey: string | undefined, oldBroker: string | undefined, oldMode: string | undefined): void {
+  if (oldKey === undefined) delete process.env.URA_ACCESS_KEY;
+  else process.env.URA_ACCESS_KEY = oldKey;
+  if (oldBroker === undefined) delete process.env.SG_HOUSING_URA_TOKEN_BROKER_URL;
+  else process.env.SG_HOUSING_URA_TOKEN_BROKER_URL = oldBroker;
+  if (oldMode === undefined) delete process.env.SG_HOUSING_DISTRIBUTION_MODE;
+  else process.env.SG_HOUSING_DISTRIBUTION_MODE = oldMode;
+}

@@ -1,6 +1,6 @@
 import type { DistributionMode } from "./types.js";
 
-const DEFAULT_URA_TOKEN_BROKER_URL = "";
+const DEFAULT_URA_TOKEN_BROKER_URL = "https://sg-housing-data-mcp-spec.vercel.app/api/ura";
 
 export type CredentialStrategy =
   | { kind: "env_access_key"; accessKey: string }
