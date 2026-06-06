@@ -4,7 +4,7 @@ Singapore housing/property data tools for AI agents.
 
 This package provides a local MCP server for Claude Desktop, Claude Code, Codex CLI, and other MCP clients. It exposes curated HDB, CEA, data.gov.sg, and URA private residential data through bounded, agent-friendly tools.
 
-Detailed URA private residential tools work out of the box through a maintained Vercel proxy. End users do not configure URA credentials, and the npm package does not embed a URA access key.
+Detailed URA private residential tools and data.gov.sg queries work out of the box through maintained Vercel proxies. End users do not configure API keys, and the npm package does not embed URA or data.gov.sg credentials.
 
 ## Install
 
@@ -23,6 +23,7 @@ sg-housing doctor --mcp --json
 Expected result:
 
 - `distribution_mode` is `maintained`
+- `data_gov_credentials` is `ok`
 - `ura_credentials` is `ok`
 - `mcp_stdio` is `ok`
 
@@ -160,7 +161,7 @@ Once configured, ask housing questions directly in your agent. The MCP server ke
 Notes:
 
 - HDB and CEA data come from public data.gov.sg sources.
-- URA private residential transaction tools use the maintained proxy by default.
+- data.gov.sg and URA private residential tools use maintained proxies by default.
 - CEA transaction records do not include transaction prices.
 - URA private sale records do not include unit numbers; coordinates are project-level.
 - Results are not valuation advice.
@@ -174,4 +175,4 @@ npm run prepublishOnly
 npm pack --dry-run
 ```
 
-Vercel proxy details are in [docs/VERCEL_PROXY.md](docs/VERCEL_PROXY.md). npm release steps are in [docs/NPM_RELEASE.md](docs/NPM_RELEASE.md).
+Maintained proxy details are in [docs/VERCEL_PROXY.md](docs/VERCEL_PROXY.md). npm release steps are in [docs/NPM_RELEASE.md](docs/NPM_RELEASE.md).

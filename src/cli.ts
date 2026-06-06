@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { aggregateHousingRows } from "./aggregate.js";
-import { getCredentialStrategy, getDistributionMode } from "./credentials.js";
+import { getCredentialStrategy, getDataGovStrategy, getDistributionMode } from "./credentials.js";
 import { isOk } from "./envelope.js";
 import { queryHousingRows } from "./query.js";
 import { listSources } from "./registry.js";
@@ -223,9 +223,11 @@ program
   .action(async (options: { mcp?: boolean; skipUpdateCheck?: boolean; json?: boolean }) => {
     const update = options.skipUpdateCheck ? null : await checkPackageUpdate();
     const credentialStrategy = getCredentialStrategy();
+    const dataGovStrategy = getDataGovStrategy();
     const checks: DoctorCheck[] = [
       { name: "node", status: "ok", message: process.version },
       { name: "package", status: "ok", message: `${PACKAGE_NAME} ${PACKAGE_VERSION}` },
+      await checkDataGovAccess(dataGovStrategy),
       {
         name: "ura_credentials",
         status: credentialStrategy.kind === "unavailable" ? "unavailable" : "ok",
@@ -392,6 +394,56 @@ type DoctorCheck = {
   message: string;
   next_action?: string;
 };
+
+async function checkDataGovAccess(strategy: ReturnType<typeof getDataGovStrategy>): Promise<DoctorCheck> {
+  if (strategy.kind === "direct_with_key") {
+    return {
+      name: "data_gov_credentials",
+      status: "ok",
+      message: "Direct data.gov.sg API key is configured."
+    };
+  }
+  if (strategy.kind === "public_direct") {
+    return {
+      name: "data_gov_credentials",
+      status: "degraded",
+      message: "Using public data.gov.sg access without an API key.",
+      next_action: "Use the maintained package/proxy or set DATA_GOV_SG_API_KEY with SG_HOUSING_DATA_GOV_DIRECT=1 for development."
+    };
+  }
+
+  try {
+    const response = await fetch(strategy.proxyUrl, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) {
+      return {
+        name: "data_gov_credentials",
+        status: "unavailable",
+        message: `Maintained data.gov.sg proxy returned HTTP ${response.status}.`,
+        next_action: "Verify the Vercel data.gov.sg proxy is deployed and reachable."
+      };
+    }
+    const payload = (await response.json()) as { configured?: unknown };
+    return {
+      name: "data_gov_credentials",
+      status: payload.configured === true ? "ok" : "degraded",
+      message:
+        payload.configured === true
+          ? "Maintained data.gov.sg proxy is configured with an API key."
+          : "Maintained data.gov.sg proxy is reachable but DATA_GOV_SG_API_KEY is not configured.",
+      next_action: payload.configured === true ? undefined : "Set DATA_GOV_SG_API_KEY on Vercel to use higher data.gov.sg rate limits."
+    };
+  } catch (error) {
+    return {
+      name: "data_gov_credentials",
+      status: "unavailable",
+      message: `Maintained data.gov.sg proxy health check failed: ${error instanceof Error ? error.message : String(error)}`,
+      next_action: "Verify network access and the Vercel data.gov.sg proxy deployment."
+    };
+  }
+}
 
 async function checkMcpStdio(): Promise<DoctorCheck> {
   const cliPath = fileURLToPath(import.meta.url);

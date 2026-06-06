@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { aggregateHousingRows } from "./aggregate.js";
 import { encodeCursor } from "./cursor.js";
+import { DataGovClient } from "./datagov-client.js";
 import { rowMatchesFilters } from "./filters.js";
 import { queryHousingRows, normalizeRow } from "./query.js";
 
@@ -83,6 +84,63 @@ describe("row filters", () => {
   });
 });
 
+describe("data.gov.sg client transport", () => {
+  it("uses the maintained data.gov.sg proxy by default", async () => {
+    const oldFetch = globalThis.fetch;
+    const oldProxy = process.env.SG_HOUSING_DATA_GOV_PROXY_URL;
+    const oldDirect = process.env.SG_HOUSING_DATA_GOV_DIRECT;
+    const oldKey = process.env.DATA_GOV_SG_API_KEY;
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    process.env.SG_HOUSING_DATA_GOV_PROXY_URL = "https://example.test/api/data-gov";
+    delete process.env.SG_HOUSING_DATA_GOV_DIRECT;
+    delete process.env.DATA_GOV_SG_API_KEY;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      return new Response(JSON.stringify({ success: true, result: { records: [], total: 0, resource_id: "test" } }), { status: 200 });
+    }) as typeof fetch;
+
+    await new DataGovClient().searchRows({ resourceId: "test", limit: 10, offset: 5, filters: { town: "A" }, sort: "month desc" });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://example.test/api/data-gov");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      resource_id: "test",
+      limit: 10,
+      offset: 5,
+      filters: { town: "A" },
+      sort: "month desc"
+    });
+
+    globalThis.fetch = oldFetch;
+    restoreDataGovEnv(oldProxy, oldDirect, oldKey);
+  });
+
+  it("can use direct data.gov.sg API key mode for development", async () => {
+    const oldFetch = globalThis.fetch;
+    const oldProxy = process.env.SG_HOUSING_DATA_GOV_PROXY_URL;
+    const oldDirect = process.env.SG_HOUSING_DATA_GOV_DIRECT;
+    const oldKey = process.env.DATA_GOV_SG_API_KEY;
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    delete process.env.SG_HOUSING_DATA_GOV_PROXY_URL;
+    process.env.SG_HOUSING_DATA_GOV_DIRECT = "1";
+    process.env.DATA_GOV_SG_API_KEY = "dev-key";
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      return new Response(JSON.stringify({ success: true, result: { records: [], total: 0, resource_id: "test" } }), { status: 200 });
+    }) as typeof fetch;
+
+    await new DataGovClient().searchRows({ resourceId: "test", limit: 10 });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toContain("https://data.gov.sg/api/action/datastore_search");
+    expect((calls[0]?.init?.headers as Record<string, string>)["x-api-key"]).toBe("dev-key");
+
+    globalThis.fetch = oldFetch;
+    restoreDataGovEnv(oldProxy, oldDirect, oldKey);
+  });
+});
+
 describe("query cursor", () => {
   it("continues within the same backend page without dropping rows", async () => {
     const fakeClient = {
@@ -126,6 +184,15 @@ describe("query cursor", () => {
     expect(result.error.code).toBe("VALIDATION_ERROR");
   });
 });
+
+function restoreDataGovEnv(oldProxy: string | undefined, oldDirect: string | undefined, oldKey: string | undefined): void {
+  if (oldProxy === undefined) delete process.env.SG_HOUSING_DATA_GOV_PROXY_URL;
+  else process.env.SG_HOUSING_DATA_GOV_PROXY_URL = oldProxy;
+  if (oldDirect === undefined) delete process.env.SG_HOUSING_DATA_GOV_DIRECT;
+  else process.env.SG_HOUSING_DATA_GOV_DIRECT = oldDirect;
+  if (oldKey === undefined) delete process.env.DATA_GOV_SG_API_KEY;
+  else process.env.DATA_GOV_SG_API_KEY = oldKey;
+}
 
 describe("aggregate cursor", () => {
   it("continues scanning after a partial aggregation cursor", async () => {
