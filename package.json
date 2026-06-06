@@ -1,6 +1,6 @@
 {
   "name": "sg-housing-data",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Local CLI and MCP server for Singapore housing/property public data.",
   "type": "module",
   "license": "MIT",

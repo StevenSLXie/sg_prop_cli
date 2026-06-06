@@ -60,6 +60,89 @@ function runStaticGate() {
       name: "incomplete input eval case",
       file: "evals/buyer-shortlist/incomplete-input-clarify.md",
       required: ["Ask a small number of clarifying questions", "Do not ask for every possible dimension", "budget", "location"]
+    },
+    {
+      name: "project deep dive skill",
+      file: "skills/sg-property-project-deep-dive/SKILL.md",
+      required: [
+        /^---[\s\S]*name: sg-property-project-deep-dive[\s\S]*description:/m,
+        "find_private_residential_sale_comparables",
+        "Unit mix and bedroom count",
+        "Every external project metadata or listing claim must include source name + URL",
+        "Ask at most 1-3 focused questions",
+        "layout_turnover_rate",
+        "project_turnover_rate",
+        "area-band proxy, not verified bedroom count",
+        "Do not present turnover as precise if the denominator is estimated.",
+        "Price Trend And Peer Comparison",
+        "Active Listing Check",
+        "Required Report Structure",
+        "not valuation advice"
+      ]
+    },
+    {
+      name: "project deep dive report template",
+      file: "skills/sg-property-project-deep-dive/references/report-template.md",
+      required: [
+        "Executive Answer",
+        "Project Snapshot",
+        "Target Layout Supply And Liquidity",
+        "Price Evidence",
+        "Peer Comparison",
+        "Active Listings",
+        "Sources And Caveats"
+      ]
+    },
+    {
+      name: "project deep dive source map",
+      file: "skills/sg-property-project-deep-dive/references/source-map.md",
+      required: [
+        "Transaction Evidence",
+        "Project Metadata",
+        "Active Listings",
+        "PropertyGuru",
+        "99.co",
+        "EdgeProp",
+        "SRX",
+        "Capture checklist",
+        "URL"
+      ]
+    },
+    {
+      name: "project turnover methodology",
+      file: "skills/sg-property-project-deep-dive/references/turnover-methodology.md",
+      required: [
+        "layout_turnover_rate",
+        "project_turnover_rate",
+        "denominator",
+        "Do not report layout turnover as exact"
+      ]
+    },
+    {
+      name: "D'LEEDON project deep dive eval case",
+      file: "evals/project-deep-dive/dleedon-3bed.md",
+      required: [
+        "D'LEEDON",
+        "3-bedder",
+        "liquidity",
+        "past-year price trend",
+        "comparable nearby projects",
+        "current asking prices"
+      ]
+    },
+    {
+      name: "D'LEEDON passing sample report",
+      file: "evals/project-deep-dive/sample-reports/dleedon-pass.md",
+      required: [
+        "Recommendation",
+        "Transaction window",
+        "Sample size",
+        "URA rows do not include bedroom count",
+        "project turnover proxy",
+        "Peer Comparison",
+        "Active listing check not completed",
+        "not valuation advice"
+      ]
     }
   ];
 
@@ -101,6 +184,20 @@ function runReportGate(reportPath, caseName) {
 
   if (caseName === "d9" || /bedder|bedroom|3-bed/i.test(lower)) {
     mustMatch(failures, text, /bed(room|der).*not.*URA|URA.*not.*bed(room|der)|layout.*verify|needs verification/i, "missing bedroom/layout caveat");
+  }
+
+  if (caseName === "project-deep-dive") {
+    mustMatch(failures, text, /\b(recommendation|shortlist|watch|pass)\b/i, "missing recommendation");
+    mustMatch(failures, text, /\b(liquidity|turnover)\b/i, "missing liquidity or turnover analysis");
+    mustMatch(failures, text, /\b(layout_turnover_rate|project_turnover_rate|turnover proxy|project turnover proxy|layout turnover)\b/i, "missing turnover method or proxy");
+    mustMatch(failures, text, /\bdenominator\b|\btotal units\b|\bunit count\b|\bunit-mix\b|\bunit mix\b/i, "missing turnover denominator discussion");
+    mustMatch(failures, text, /\b\d+(\.\d+)?\s*%\b|turnover cannot be calculated|cannot calculate.*turnover|cannot compute.*turnover/i, "missing numeric turnover or explicit cannot-calculate statement");
+    mustMatch(failures, text, /\b(latest|last|past|prior)\s+12\s+months\b|\b12-month\b/i, "missing 12-month trend framing");
+    mustMatch(failures, text, /\bmedian\b.*\bpsf\b|\bpsf\b.*\bmedian\b/i, "missing median PSF evidence");
+    mustMatch(failures, text, /\b(peer|comparable|comparison)\b/i, "missing peer comparison");
+    mustMatch(failures, text, /\b(active listing|asking price|listing check)\b/i, "missing active listing check");
+    mustMatch(failures, text, /https?:\/\/\S+/i, "missing at least one external source URL");
+    mustMatch(failures, text, /source|https?:\/\/|needs verification/i, "missing source or needs-verification discipline");
   }
 
   const metadataTerms = /(TOP|tenure|freehold|leasehold|MRT|school|developer|bedroom|bedder|layout|floor\s*plan)/i;
