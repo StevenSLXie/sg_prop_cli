@@ -6,42 +6,6 @@ This package provides a local MCP server for Claude Desktop, Claude Code, Codex 
 
 Detailed URA private residential tools work out of the box through a maintained Vercel proxy. End users do not configure URA credentials, and the npm package does not embed a URA access key.
 
-## Example Use Cases
-
-Use it from Claude Desktop, Claude Code, or Codex CLI as a local MCP server. The agent can call bounded tools, then summarize the results in plain language.
-
-### Private condo shortlist from recent transactions
-
-Ask budget-and-area questions over URA private sale transactions, then get a compact project list with price ranges and PSF context.
-
-```text
-D9 with 3M budget, can one afford a 3 bedded freehold, regardless TOP year?
-Give me a very brief project list using recent transaction data.
-```
-
-![Private sale shortlist example](examples/private-sale-shortlist.png)
-
-### HDB resale summary by lease and location
-
-Ask about HDB resale transactions with lease, flat type, district/town, street, area, or date filters. The tools keep scans bounded and expose normalized fields such as `remaining_lease_months`.
-
-```text
-Check latest transaction data for 5-room HDB at D3, for those with remaining lease > 80 yrs.
-Give me a brief summary.
-```
-
-![HDB lease summary example](examples/hdb-lease-summary.png)
-
-### CEA salesperson public transaction record
-
-Look up public CEA salesperson activity by registration number and summarize recent sale/rental records. CEA records do not include transaction prices.
-
-```text
-Check this salesperson's recent 2-year record and give me a brief summary.
-```
-
-![CEA salesperson summary example](examples/cea-salesperson-summary.png)
-
 ## Install
 
 Install the latest package:
@@ -150,21 +114,48 @@ tool_timeout_sec = 120
 
 Restart Codex after changing the config.
 
-## What It Can Answer
+## Example Use Cases
 
-Examples:
+Once configured, ask housing questions directly in your agent. The MCP server keeps tool calls bounded, returns compact data, and lets the agent write the final summary.
 
-```text
-Bukit Merah recent 5-room HDB resale prices, with median and example rows.
-```
-
-```text
-D'LEEDON recent private sale transactions, summarized by area and price PSF.
-```
-
-```text
-Find CEA salesperson R060096F and summarize public CEA transaction activity.
-```
+<table>
+  <tr>
+    <td width="42%" valign="top">
+      <strong>Private condo shortlist from recent transactions</strong>
+      <br><br>
+      Ask budget-and-area questions over URA private sale transactions, then get a compact project list with price ranges and PSF context.
+      <br><br>
+      <code>D9 with 3M budget, can one afford a 3 bedded freehold?</code>
+    </td>
+    <td width="58%" valign="top">
+      <img src="examples/private-sale-shortlist.png" width="420" alt="Private sale shortlist example">
+    </td>
+  </tr>
+  <tr>
+    <td width="42%" valign="top">
+      <strong>HDB resale summary by lease and location</strong>
+      <br><br>
+      Filter HDB resale transactions by lease, flat type, district/town, street, area, or date. The tools expose normalized fields such as <code>remaining_lease_months</code>.
+      <br><br>
+      <code>5-room HDB at D3, remaining lease &gt; 80 yrs</code>
+    </td>
+    <td width="58%" valign="top">
+      <img src="examples/hdb-lease-summary.png" width="420" alt="HDB lease summary example">
+    </td>
+  </tr>
+  <tr>
+    <td width="42%" valign="top">
+      <strong>CEA salesperson public transaction record</strong>
+      <br><br>
+      Look up public CEA salesperson activity by registration number and summarize recent sale/rental records. CEA records do not include transaction prices.
+      <br><br>
+      <code>Check this salesperson's recent 2-year record</code>
+    </td>
+    <td width="58%" valign="top">
+      <img src="examples/cea-salesperson-summary.png" width="420" alt="CEA salesperson summary example">
+    </td>
+  </tr>
+</table>
 
 Notes:
 
