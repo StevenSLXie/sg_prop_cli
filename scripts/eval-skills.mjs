@@ -13,93 +13,54 @@ if (args.report) {
 function runStaticGate() {
   const checks = [
     {
-      name: "buyer shortlist skill",
-      file: "skills/sg-property-buyer-shortlist/SKILL.md",
+      name: "client report skill",
+      file: "skills/sg-property-client-report/SKILL.md",
       required: [
-        /^---[\s\S]*name: sg-property-buyer-shortlist[\s\S]*description:/m,
-        "Use external sources",
-        "Bedroom count is not in URA private sale transaction rows.",
-        "source name and URL",
-        "Clarifying Questions",
-        "Ask at most 1-3 focused questions",
-        "Do not require every input dimension",
+        /^---[\s\S]*name: sg-property-client-report[\s\S]*description:/m,
+        "Buyer brief / shortlist",
+        "Project deep dive",
+        "Project comparison",
         "find_private_residential_sale_comparables",
         'output_mode: "summary"',
         "project_summaries",
-        "Required Report Structure",
-        "Minimum Quality Bar",
-        "not valuation advice"
-      ]
-    },
-    {
-      name: "buyer shortlist report template",
-      file: "skills/sg-property-buyer-shortlist/references/report-template.md",
-      required: ["Brief Answer", "Shortlist", "Recommended Next Steps", "Watch-Outs", "Evidence"]
-    },
-    {
-      name: "buyer shortlist source policy",
-      file: "skills/sg-property-buyer-shortlist/references/source-policy.md",
-      required: ["Transaction Evidence", "External Metadata", "Claim Discipline", "source name + URL"]
-    },
-    {
-      name: "D18 eval case",
-      file: "evals/buyer-shortlist/d18-1600k-2200k-900-1200sqft.md",
-      required: ["900-1200 sqft", "84-111 sqm", "district: \"18\"", "output_mode: \"summary\"", "project_summaries"]
-    },
-    {
-      name: "D9 eval case",
-      file: "evals/buyer-shortlist/d9-3m-freehold-3bed.md",
-      required: ["3 bedded freehold", "max budget", "bedroom count is not in URA rows", "sample size"]
-    },
-    {
-      name: "buyer shortlist checklist",
-      file: "evals/buyer-shortlist/checklist.md",
-      required: ["Query Planning", "Evidence", "Report Quality", "Automatic Minimum Gate", "--report"]
-    },
-    {
-      name: "incomplete input eval case",
-      file: "evals/buyer-shortlist/incomplete-input-clarify.md",
-      required: ["Ask a small number of clarifying questions", "Do not ask for every possible dimension", "budget", "location"]
-    },
-    {
-      name: "project deep dive skill",
-      file: "skills/sg-property-project-deep-dive/SKILL.md",
-      required: [
-        /^---[\s\S]*name: sg-property-project-deep-dive[\s\S]*description:/m,
-        "find_private_residential_sale_comparables",
-        "Unit mix and bedroom count",
         "Every external project metadata or listing claim must include source name + URL",
         "Ask at most 1-3 focused questions",
+        "Do not require every dimension before starting",
+        "area-band proxy, not verified bedroom count",
         "layout_turnover_rate",
         "project_turnover_rate",
-        "area-band proxy, not verified bedroom count",
-        "Do not present turnover as precise if the denominator is estimated.",
-        "Price Trend And Peer Comparison",
-        "Active Listing Check",
-        "Required Report Structure",
+        "Location and living fit",
+        "Unit mix, layout, and stack/site considerations",
+        "Active listings and negotiation frame",
+        "Who this is suitable for and who should avoid it",
         "not valuation advice"
       ]
     },
     {
-      name: "project deep dive report template",
-      file: "skills/sg-property-project-deep-dive/references/report-template.md",
+      name: "client report template",
+      file: "skills/sg-property-client-report/references/report-template.md",
       required: [
         "Executive Answer",
-        "Project Snapshot",
-        "Target Layout Supply And Liquidity",
+        "Client Brief And Assumptions",
+        "Market Map Or Project Snapshot",
+        "Location And Living Fit",
+        "Unit Mix, Layout, And Stack/Site Considerations",
+        "Liquidity And Turnover",
         "Price Evidence",
         "Peer Comparison",
-        "Active Listings",
+        "Active Listings And Negotiation Frame",
+        "Recommendation",
         "Sources And Caveats"
       ]
     },
     {
-      name: "project deep dive source map",
-      file: "skills/sg-property-project-deep-dive/references/source-map.md",
+      name: "client report source map",
+      file: "skills/sg-property-client-report/references/source-map.md",
       required: [
         "Transaction Evidence",
         "Project Metadata",
         "Active Listings",
+        "Stacked Homes",
         "PropertyGuru",
         "99.co",
         "EdgeProp",
@@ -109,8 +70,8 @@ function runStaticGate() {
       ]
     },
     {
-      name: "project turnover methodology",
-      file: "skills/sg-property-project-deep-dive/references/turnover-methodology.md",
+      name: "client report turnover methodology",
+      file: "skills/sg-property-client-report/references/turnover-methodology.md",
       required: [
         "layout_turnover_rate",
         "project_turnover_rate",
@@ -119,8 +80,33 @@ function runStaticGate() {
       ]
     },
     {
-      name: "D'LEEDON project deep dive eval case",
-      file: "evals/project-deep-dive/dleedon-3bed.md",
+      name: "client report research patterns",
+      file: "skills/sg-property-client-report/references/research-patterns.md",
+      required: [
+        "Stacked-Style Depth Cues",
+        "project facts and full rundown",
+        "site plan and stack analysis",
+        "pricing analysis against nearby alternatives",
+        "who should like it and who should avoid it",
+        "First-Principles Client Questions"
+      ]
+    },
+    {
+      name: "D18 buyer brief eval case",
+      file: "evals/client-report/d18-buyer-brief.md",
+      required: [
+        "1.6-2.2m",
+        "900-1200 sqft",
+        "84-111 sqm",
+        "output_mode: \"summary\"",
+        "project_summaries",
+        "watch-outs",
+        "recommendation"
+      ]
+    },
+    {
+      name: "D'LEEDON client report eval case",
+      file: "evals/client-report/dleedon-3bed.md",
       required: [
         "D'LEEDON",
         "3-bedder",
@@ -131,8 +117,8 @@ function runStaticGate() {
       ]
     },
     {
-      name: "D'LEEDON passing sample report",
-      file: "evals/project-deep-dive/sample-reports/dleedon-pass.md",
+      name: "D'LEEDON passing sample client report",
+      file: "evals/client-report/sample-reports/dleedon-pass.md",
       required: [
         "Recommendation",
         "Transaction window",
@@ -141,6 +127,7 @@ function runStaticGate() {
         "project turnover proxy",
         "Peer Comparison",
         "Active listing check not completed",
+        "Who should avoid",
         "not valuation advice"
       ]
     }
@@ -186,8 +173,11 @@ function runReportGate(reportPath, caseName) {
     mustMatch(failures, text, /bed(room|der).*not.*URA|URA.*not.*bed(room|der)|layout.*verify|needs verification/i, "missing bedroom/layout caveat");
   }
 
-  if (caseName === "project-deep-dive") {
+  if (caseName === "client-report") {
     mustMatch(failures, text, /\b(recommendation|shortlist|watch|pass)\b/i, "missing recommendation");
+    mustMatch(failures, text, /\b(client brief|assumptions|buyer|investor|self-stay)\b/i, "missing client brief or assumptions");
+    mustMatch(failures, text, /\b(location|MRT|commute|school|amenit|living fit)\b/i, "missing location/living-fit discussion");
+    mustMatch(failures, text, /\b(unit mix|layout|floor[- ]?plan|stack|site)\b/i, "missing unit/layout/stack/site discussion");
     mustMatch(failures, text, /\b(liquidity|turnover)\b/i, "missing liquidity or turnover analysis");
     mustMatch(failures, text, /\b(layout_turnover_rate|project_turnover_rate|turnover proxy|project turnover proxy|layout turnover)\b/i, "missing turnover method or proxy");
     mustMatch(failures, text, /\bdenominator\b|\btotal units\b|\bunit count\b|\bunit-mix\b|\bunit mix\b/i, "missing turnover denominator discussion");
@@ -198,6 +188,7 @@ function runReportGate(reportPath, caseName) {
     mustMatch(failures, text, /\b(active listing|asking price|listing check)\b/i, "missing active listing check");
     mustMatch(failures, text, /https?:\/\/\S+/i, "missing at least one external source URL");
     mustMatch(failures, text, /source|https?:\/\/|needs verification/i, "missing source or needs-verification discipline");
+    mustMatch(failures, text, /\b(who this suits|who should avoid|suitable for|avoid it|watch-outs|caution)\b/i, "missing suitability/watch-out framing");
   }
 
   const metadataTerms = /(TOP|tenure|freehold|leasehold|MRT|school|developer|bedroom|bedder|layout|floor\s*plan)/i;

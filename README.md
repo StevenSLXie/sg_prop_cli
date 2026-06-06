@@ -122,10 +122,10 @@ Once configured, ask housing questions directly in your agent. The MCP server ke
 Optional experimental skill:
 
 ```bash
-npx skills add StevenSLXie/sg_prop_cli --skill sg-property-buyer-shortlist
+npx skills add StevenSLXie/sg_prop_cli --skill sg-property-client-report
 ```
 
-The skill adds a buyer-shortlist report workflow for budget, district, size, bedroom, tenure, self-stay, or investment briefs. It uses sg-housing transaction evidence and requires external sources for project metadata such as bedroom layouts, TOP, MRT distance, and developer.
+The skill adds a client-report workflow for Singapore private residential decisions. It supports both broad buyer briefs and specific project deep dives, then combines sg-housing transaction evidence with external project metadata, layout checks, active listings, liquidity, peer comparison, and an objective recommendation.
 
 <table>
   <tr>
