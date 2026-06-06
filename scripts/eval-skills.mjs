@@ -20,6 +20,9 @@ function runStaticGate() {
         "Use external sources",
         "Bedroom count is not in URA private sale transaction rows.",
         "source name and URL",
+        "Clarifying Questions",
+        "Ask at most 1-3 focused questions",
+        "Do not require every input dimension",
         "find_private_residential_sale_comparables",
         'output_mode: "summary"',
         "project_summaries",
@@ -52,6 +55,11 @@ function runStaticGate() {
       name: "buyer shortlist checklist",
       file: "evals/buyer-shortlist/checklist.md",
       required: ["Query Planning", "Evidence", "Report Quality", "Automatic Minimum Gate", "--report"]
+    },
+    {
+      name: "incomplete input eval case",
+      file: "evals/buyer-shortlist/incomplete-input-clarify.md",
+      required: ["Ask a small number of clarifying questions", "Do not ask for every possible dimension", "budget", "location"]
     }
   ];
 

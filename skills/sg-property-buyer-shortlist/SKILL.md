@@ -40,6 +40,25 @@ Default assumptions when the user does not specify:
 - Sale type: `resale` for resale buyer shortlist questions.
 - Output: 5-8 candidate projects, then 3-5 strongest next-step projects.
 
+## Clarifying Questions
+
+Ask a clarifying question when the brief is too ambiguous to build a useful shortlist. Do not require every input dimension to be filled.
+
+Proceed without asking when the user provides enough to form a bounded search, usually:
+
+- budget plus location, or
+- budget plus size/layout, or
+- location plus size/layout and a clear use case.
+
+Ask at most 1-3 focused questions. Prefer the smallest set that changes the search materially:
+
+- Budget range or max budget, if missing.
+- Target location, district, MRT, school, or region, if missing.
+- Size or bedroom target, if missing and the shortlist would otherwise be too broad.
+- Use case, if the ranking depends on self-stay vs investment.
+
+Do not ask for all of budget, district, size, bedroom, tenure, property type, use case, MRT, school, and exclusions in one turn. If only minor details are missing, make reasonable assumptions, state them, and continue.
+
 ## Data Acquisition Plan
 
 1. Query transaction candidates first.
