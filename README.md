@@ -119,6 +119,14 @@ Restart Codex after changing the config.
 
 Once configured, ask housing questions directly in your agent. The MCP server keeps tool calls bounded, returns compact data, and lets the agent write the final summary.
 
+Optional experimental skill:
+
+```bash
+npx skills add StevenSLXie/sg_prop_cli --skill sg-property-buyer-shortlist
+```
+
+The skill adds a buyer-shortlist report workflow for budget, district, size, bedroom, tenure, self-stay, or investment briefs. It uses sg-housing transaction evidence and requires external sources for project metadata such as bedroom layouts, TOP, MRT distance, and developer.
+
 <table>
   <tr>
     <td width="42%" valign="top">
