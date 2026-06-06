@@ -6,6 +6,42 @@ This package provides a local MCP server for Claude Desktop, Claude Code, Codex 
 
 Detailed URA private residential tools work out of the box through a maintained Vercel proxy. End users do not configure URA credentials, and the npm package does not embed a URA access key.
 
+## Example Use Cases
+
+Use it from Claude Desktop, Claude Code, or Codex CLI as a local MCP server. The agent can call bounded tools, then summarize the results in plain language.
+
+### Private condo shortlist from recent transactions
+
+Ask budget-and-area questions over URA private sale transactions, then get a compact project list with price ranges and PSF context.
+
+```text
+D9 with 3M budget, can one afford a 3 bedded freehold, regardless TOP year?
+Give me a very brief project list using recent transaction data.
+```
+
+![Private sale shortlist example](examples/private-sale-shortlist.png)
+
+### HDB resale summary by lease and location
+
+Ask about HDB resale transactions with lease, flat type, district/town, street, area, or date filters. The tools keep scans bounded and expose normalized fields such as `remaining_lease_months`.
+
+```text
+Check latest transaction data for 5-room HDB at D3, for those with remaining lease > 80 yrs.
+Give me a brief summary.
+```
+
+![HDB lease summary example](examples/hdb-lease-summary.png)
+
+### CEA salesperson public transaction record
+
+Look up public CEA salesperson activity by registration number and summarize recent sale/rental records. CEA records do not include transaction prices.
+
+```text
+Check this salesperson's recent 2-year record and give me a brief summary.
+```
+
+![CEA salesperson summary example](examples/cea-salesperson-summary.png)
+
 ## Install
 
 Install the latest package:
