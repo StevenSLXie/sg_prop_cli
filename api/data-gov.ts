@@ -1,6 +1,10 @@
 const DATASTORE_SEARCH_URL = "https://data.gov.sg/api/action/datastore_search";
 const MAX_LIMIT = 500;
 const MAX_FILTER_BYTES = 4096;
+const HEALTH_RESOURCE_ID = "d_b51323a474ba789fb4cc3db58a3116d4";
+const HEALTH_TTL_MS = 60_000;
+
+let healthCache: { checkedAt: number; payload: HealthPayload } | null = null;
 
 const ALLOWED_RESOURCE_IDS = new Set([
   "d_8b84c4ee58e3cfc0ece0d773c8ca6abc",
@@ -24,10 +28,11 @@ export default async function handler(request: any, response: any) {
   response.setHeader("cache-control", "s-maxage=30, stale-while-revalidate=120");
 
   if (request.method === "GET") {
+    const health = await healthPayload();
     response.status(200).json({
       ok: true,
       service: "sg-housing-data-gov-proxy",
-      configured: Boolean(getApiKey()),
+      ...health,
       allowed_resource_count: ALLOWED_RESOURCE_IDS.size
     });
     return;
@@ -52,6 +57,26 @@ export default async function handler(request: any, response: any) {
   } catch (error) {
     const mapped = mapError(error);
     response.status(mapped.status).json({ success: false, error: { code: mapped.code, message: mapped.message } });
+  }
+}
+
+async function healthPayload(): Promise<HealthPayload> {
+  const configured = Boolean(getApiKey());
+  const now = Date.now();
+  if (healthCache && now - healthCache.checkedAt < HEALTH_TTL_MS) return healthCache.payload;
+  try {
+    await invokeDatastore({ resource_id: HEALTH_RESOURCE_ID, limit: 1, offset: 0 });
+    const payload = { configured, upstream_ok: true };
+    healthCache = { checkedAt: now, payload };
+    return payload;
+  } catch (error) {
+    const payload = {
+      configured,
+      upstream_ok: false,
+      upstream_error: error instanceof Error ? error.message : String(error)
+    };
+    healthCache = { checkedAt: now, payload };
+    return payload;
   }
 }
 
@@ -177,6 +202,12 @@ type ProxyDatastoreParams = {
   offset: number;
   filters?: Record<string, string | number | Array<string | number>>;
   sort?: string;
+};
+
+type HealthPayload = {
+  configured: boolean;
+  upstream_ok: boolean;
+  upstream_error?: string;
 };
 
 class ProxyError extends Error {

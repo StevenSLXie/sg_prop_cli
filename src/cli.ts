@@ -425,15 +425,22 @@ async function checkDataGovAccess(strategy: ReturnType<typeof getDataGovStrategy
         next_action: "Verify the Vercel data.gov.sg proxy is deployed and reachable."
       };
     }
-    const payload = (await response.json()) as { configured?: unknown };
+    const payload = (await response.json()) as { configured?: unknown; upstream_ok?: unknown; upstream_error?: unknown };
     return {
       name: "data_gov_credentials",
-      status: payload.configured === true ? "ok" : "degraded",
+      status: payload.configured === true && payload.upstream_ok === true ? "ok" : "degraded",
       message:
-        payload.configured === true
-          ? "Maintained data.gov.sg proxy is configured with an API key."
-          : "Maintained data.gov.sg proxy is reachable but DATA_GOV_SG_API_KEY is not configured.",
-      next_action: payload.configured === true ? undefined : "Set DATA_GOV_SG_API_KEY on Vercel to use higher data.gov.sg rate limits."
+        payload.configured === true && payload.upstream_ok === true
+          ? "Maintained data.gov.sg proxy is configured with a working API key."
+          : payload.configured === true
+            ? `Maintained data.gov.sg proxy is reachable but upstream probe failed${payload.upstream_error ? `: ${String(payload.upstream_error)}` : "."}`
+            : "Maintained data.gov.sg proxy is reachable but DATA_GOV_SG_API_KEY is not configured.",
+      next_action:
+        payload.configured === true && payload.upstream_ok === true
+          ? undefined
+          : payload.configured === true
+            ? "Verify DATA_GOV_SG_API_KEY on Vercel and redeploy if needed."
+            : "Set DATA_GOV_SG_API_KEY on Vercel to use higher data.gov.sg rate limits."
     };
   } catch (error) {
     return {
