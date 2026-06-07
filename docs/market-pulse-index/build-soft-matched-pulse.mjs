@@ -242,6 +242,10 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
   if (!currentRows.length || !prevRows.length || !weightRows.length) return null;
 
   const tierDefs = universe.tiers ?? RESALE_TIER_DEFS;
+  if (tierDefs.length === 0) {
+    return computeFallbackOnlyReturn(currentRows, prevRows, prevRows, universe.fallbackCellKey, { useFloorKernel: false });
+  }
+
   const tierReturns = new Map();
   for (const tier of tierDefs) {
     tierReturns.set(tier.tier, buildKernelReturnMap(currentRows, prevRows, tier.keyFn, tier.minN));
@@ -303,6 +307,67 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
     dispersion: median(returns.map((value) => Math.abs(value - medianReturn))),
     tier_atom_counts: objectFromMap(tierAtomCounts)
   };
+}
+
+function computeFallbackOnlyReturn(currentRows, prevRows, weightRows, cellKeyFn, options = {}) {
+  const fallbackReturns = options.useFloorKernel
+    ? buildKernelReturnMap(currentRows, prevRows, cellKeyFn, 8)
+    : buildMedianReturnMap(currentRows, prevRows, cellKeyFn, 8);
+  const weightByCell = groupSum(weightRows, cellKeyFn, (row) => row.price || 0);
+  const totalWeight = [...weightByCell.values()].reduce((sum, value) => sum + value, 0);
+  if (totalWeight <= 0) return null;
+
+  const entries = [];
+  for (const [cell, result] of fallbackReturns.entries()) {
+    const weight = weightByCell.get(cell) ?? 0;
+    if (weight <= 0 || !Number.isFinite(result.return)) continue;
+    entries.push({
+      cell,
+      weight,
+      return: clamp(result.return, -RETURN_WINSOR_LOG, RETURN_WINSOR_LOG),
+      floor_similarity_avg: result.floor_similarity_avg,
+      floor_similarity_p25: result.floor_similarity_p25
+    });
+  }
+  const activeWeight = entries.reduce((sum, entry) => sum + entry.weight, 0);
+  if (activeWeight <= 0) return null;
+  const weightedReturn = entries.reduce((sum, entry) => sum + entry.weight * entry.return, 0) / activeWeight;
+  const returns = entries.map((entry) => entry.return);
+  const medianReturn = median(returns);
+  return {
+    return: weightedReturn,
+    coverage: activeWeight / totalWeight,
+    matched_coverage: 0,
+    fallback_share: 1,
+    top_project_weight: 0,
+    active_atom_count: entries.length,
+    total_atom_count: weightByCell.size,
+    project_count: 0,
+    floor_similarity_avg: weightedAverage(entries, (entry) => entry.floor_similarity_avg, (entry) => entry.weight),
+    floor_similarity_p25: weightedPercentile(entries, (entry) => entry.floor_similarity_p25, (entry) => entry.weight, 0.25),
+    dispersion: median(returns.map((value) => Math.abs(value - medianReturn))),
+    tier_atom_counts: { fallback_cell: entries.length }
+  };
+}
+
+function buildMedianReturnMap(currentRows, prevRows, keyFn, minN) {
+  const current = groupRows(currentRows, keyFn);
+  const previous = groupRows(prevRows, keyFn);
+  const returns = new Map();
+  for (const [key, currentGroup] of current.entries()) {
+    const prevGroup = previous.get(key);
+    if (!prevGroup || currentGroup.length < minN || prevGroup.length < minN) continue;
+    const currentMedian = median(currentGroup.map((row) => row.price_psf));
+    const prevMedian = median(prevGroup.map((row) => row.price_psf));
+    if (currentMedian && prevMedian) {
+      returns.set(key, {
+        return: Math.log(currentMedian / prevMedian),
+        floor_similarity_avg: null,
+        floor_similarity_p25: null
+      });
+    }
+  }
+  return returns;
 }
 
 function chooseReturn(row, tierDefs, tierReturns, fallbackReturns, fallbackCellKeyFn) {

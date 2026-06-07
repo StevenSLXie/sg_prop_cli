@@ -92,7 +92,7 @@ If the same project cannot be matched within the same size band, the atom uses t
 
 The same method is computed separately for `resale` and `new_sale`, so users can distinguish secondary-market movement from new-launch mix and pricing.
 
-For `new_sale`, project-level repeat matching is disabled by default. New launches often sell through in concentrated windows, so repeated project observations are treated as launch-phase mix rather than repeat-market evidence. New sale indexes therefore use fallback cells with the same floor-distance kernel.
+For `new_sale`, project-level repeat matching is disabled by default. New launches often sell through in concentrated windows, so repeated project observations are treated as launch-phase mix rather than repeat-market evidence. New sale indexes therefore use fallback `district x size` cell medians weighted by the previous 3-month window, not the 24-month resale basket. Floor is not kernel-adjusted for new sale because launch-floor pricing is part of new-launch price formation.
 
 The overall index also uses `district x size` fallback cells, not only `market segment x size`, to avoid treating cross-district launch mix as market-wide price movement.
 
