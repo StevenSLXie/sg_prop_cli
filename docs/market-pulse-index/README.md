@@ -8,10 +8,23 @@ This folder contains the standalone prototype for the Singapore Condo Market Pul
 node docs/market-pulse-index/build-market-pulse.mjs
 ```
 
+Pull only the normalized URA transaction snapshot:
+
+```bash
+node docs/market-pulse-index/pull-ura-snapshot.mjs
+```
+
+Build the soft matched-basket v0.2 prototype from the snapshot:
+
+```bash
+node docs/market-pulse-index/build-soft-matched-pulse.mjs --core-only
+```
+
 Compare quarter-end results against URA/SingStat official non-landed indexes:
 
 ```bash
 node docs/market-pulse-index/compare-with-ura.mjs
+node docs/market-pulse-index/compare-soft-matched-with-ura.mjs
 ```
 
 Compare the prototype against URA and SRX public monthly market movements:
@@ -36,6 +49,13 @@ The script writes:
 - `output/index-points.csv`
 - `output/index-points.json`
 - `output/sample-audit.json`
+- `output/normalized-snapshot.json`
+- `output/soft-matched-index-points.csv`
+- `output/soft-matched-index-points.json`
+- `output/soft-matched-sample-audit.json`
+- `output/soft-matched-ura-comparison.csv`
+- `output/soft-matched-ura-comparison.json`
+- `output/soft-matched-ura-comparison.svg`
 - `output/ura-comparison.csv`
 - `output/ura-comparison.json`
 - `output/ura-comparison.svg`
@@ -47,6 +67,17 @@ The script writes:
 Historical runs from the current URA proxy are labelled `revised_backtest`, because the proxy does not expose historical as-of snapshots. Live production publication requires storing monthly snapshots going forward.
 
 The SRX comparison uses `srx-monthly-public.csv`, which records monthly percentage changes from SRX research articles and chains them into a relative index. It is a public-source proxy rather than a raw SRX index-value pull, because SRX's index-value table is not exposed through the same stable public API pattern as URA/data.gov.sg.
+
+## Soft Matched-Basket v0.2
+
+The v0.2 prototype reduces within-cell quality drift without fitting a hedonic regression. It uses trailing historical basket weights and chooses the best available matched return for each historical atom:
+
+- `project x size x floor`, weight multiplier `1.00`
+- `project x size`, weight multiplier `0.75`
+- `project`, weight multiplier `0.50`
+- fallback universe cell, weight multiplier `0.25`
+
+Weights come from transactions before the current window, so the method does not use future or current-window composition as the basket. A single project is capped at 15% effective weight. Each output point includes matched coverage, fallback share, top project weight, sample size, and confidence.
 
 ## Scope
 
