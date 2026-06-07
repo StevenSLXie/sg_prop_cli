@@ -19,7 +19,7 @@ const SIZE_SEGMENTS = [
   { key: "large", label: ">1200 sqft", minSqft: 1200, maxSqft: Infinity }
 ];
 
-const TIER_DEFS = [
+const RESALE_TIER_DEFS = [
   { tier: "project_size_floor_kernel", multiplier: 2, minN: 3, keyFn: (row) => row._project_size_key }
 ];
 
@@ -71,8 +71,11 @@ async function main() {
       return_winsor_log: RETURN_WINSOR_LOG,
       floor_kernel_scale: FLOOR_KERNEL_SCALE,
       size_segments: SIZE_SEGMENTS.map(({ key, label, minSqft, maxSqft }) => ({ key, label, minSqft, maxSqft })),
-      tiers: [
+      resale_tiers: [
         { tier: "project_size_floor_kernel", weight_multiplier: 2, min_current_and_previous_rows: 3 },
+        { tier: "fallback_cell_floor_kernel", weight_multiplier: 1, min_current_and_previous_rows: 8 }
+      ],
+      new_sale_tiers: [
         { tier: "fallback_cell_floor_kernel", weight_multiplier: 1, min_current_and_previous_rows: 8 }
       ]
     },
@@ -115,10 +118,12 @@ function buildUniverses(rows, options = {}) {
   for (const saleType of saleTypes) {
     const prefix = saleType === "resale" ? "SG_CONDO_RESALE" : "SG_CONDO_NEW_SALE";
     const saleLabel = saleType === "resale" ? "resale" : "new_sale";
+    const tiers = saleType === "resale" ? RESALE_TIER_DEFS : [];
     universes.push({
       key: `${prefix}_OVERALL`,
       type: "overall",
       sale_type: saleLabel,
+      tiers,
       filter: (row) => row.type_of_sale === saleType,
       fallbackCellKey: (row) => `${row.market_segment || "unknown"}|${row._size_key}`
     });
@@ -129,6 +134,7 @@ function buildUniverses(rows, options = {}) {
         type: "market_segment",
         sale_type: saleLabel,
         market_segment: segment,
+        tiers,
         filter: (row) => row.type_of_sale === saleType && row.market_segment === segment,
         fallbackCellKey: (row) => `${row.district || "unknown"}|${row._size_key}`
       });
@@ -142,6 +148,7 @@ function buildUniverses(rows, options = {}) {
         type: "district",
         sale_type: saleLabel,
         district,
+        tiers,
         filter: (row) => row.type_of_sale === saleType && row.district === district,
         fallbackCellKey: (row) => row._size_key
       });
@@ -153,6 +160,7 @@ function buildUniverses(rows, options = {}) {
         type: "size_segment",
         sale_type: saleLabel,
         size_segment: segment.key,
+        tiers,
         filter: (row) => row.type_of_sale === saleType && row._size_key === segment.key,
         fallbackCellKey: (row) => row.market_segment || "unknown"
       });
@@ -233,8 +241,9 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
   const weightRows = rowsForMonths(rowsByMonth, weightMonths);
   if (!currentRows.length || !prevRows.length || !weightRows.length) return null;
 
+  const tierDefs = universe.tiers ?? RESALE_TIER_DEFS;
   const tierReturns = new Map();
-  for (const tier of TIER_DEFS) {
+  for (const tier of tierDefs) {
     tierReturns.set(tier.tier, buildKernelReturnMap(currentRows, prevRows, tier.keyFn, tier.minN));
   }
   const fallbackReturns = buildKernelReturnMap(currentRows, prevRows, universe.fallbackCellKey, 8);
@@ -244,7 +253,7 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
 
   const entries = [];
   for (const atom of atoms) {
-    const decision = chooseReturn(atom.rep, tierReturns, fallbackReturns, universe.fallbackCellKey);
+    const decision = chooseReturn(atom.rep, tierDefs, tierReturns, fallbackReturns, universe.fallbackCellKey);
     if (!decision) continue;
     entries.push({
       atom,
@@ -296,8 +305,8 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
   };
 }
 
-function chooseReturn(row, tierReturns, fallbackReturns, fallbackCellKeyFn) {
-  for (const tier of TIER_DEFS) {
+function chooseReturn(row, tierDefs, tierReturns, fallbackReturns, fallbackCellKeyFn) {
+  for (const tier of tierDefs) {
     const result = tierReturns.get(tier.tier).get(tier.keyFn(row));
     if (result && Number.isFinite(result.return)) return { tier: tier.tier, result, multiplier: tier.multiplier };
   }

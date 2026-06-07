@@ -83,7 +83,7 @@ The SRX comparison uses `srx-monthly-public.csv`, which records monthly percenta
 
 ## Soft Matched-Basket v0.4
 
-The v0.4 prototype reduces within-cell quality drift without fitting a hedonic regression. It uses trailing historical basket weights and chooses the best available matched return for each historical atom:
+The v0.4 prototype reduces within-cell quality drift without fitting a hedonic regression. For resale, it uses trailing historical basket weights and chooses the best available matched return for each historical atom:
 
 - `project x size` with floor-distance kernel, weight multiplier `2.00`
 - fallback universe cell with floor-distance kernel, weight multiplier `1.00`
@@ -91,6 +91,8 @@ The v0.4 prototype reduces within-cell quality drift without fitting a hedonic r
 If the same project cannot be matched within the same size band, the atom uses the fallback cell instead of project-only movement. Floor range is not an exact-match requirement; it is converted to a midpoint and used as a soft distance score when matching current-window transactions to previous-window transactions. Weights come from transactions before the current window, so the method does not use future or current-window composition as the basket. A single project is capped at 15% effective weight. Each output point includes matched coverage, fallback share, top project weight, floor similarity, sample size, and confidence.
 
 The same method is computed separately for `resale` and `new_sale`, so users can distinguish secondary-market movement from new-launch mix and pricing.
+
+For `new_sale`, project-level repeat matching is disabled by default. New launches often sell through in concentrated windows, so repeated project observations are treated as launch-phase mix rather than repeat-market evidence. New sale indexes therefore use fallback cells with the same floor-distance kernel.
 
 ## Scope
 
