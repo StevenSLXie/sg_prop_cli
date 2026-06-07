@@ -11,6 +11,7 @@ const WEIGHT_LOOKBACK_MONTHS = 24;
 const MIN_WEIGHT_LOOKBACK_MONTHS = 6;
 const PROJECT_WEIGHT_CAP = 0.15;
 const RETURN_WINSOR_LOG = 0.12;
+const FLOOR_KERNEL_SCALE = 10;
 
 const SIZE_SEGMENTS = [
   { key: "compact", label: "<=800 sqft", minSqft: -Infinity, maxSqft: 800 },
@@ -19,9 +20,7 @@ const SIZE_SEGMENTS = [
 ];
 
 const TIER_DEFS = [
-  { tier: "project_size_floor", multiplier: 1, minN: 2, keyFn: (row) => row._atom_key },
-  { tier: "project_size", multiplier: 0.75, minN: 3, keyFn: (row) => row._project_size_key },
-  { tier: "project", multiplier: 0.5, minN: 4, keyFn: (row) => row._project_key }
+  { tier: "project_size_floor_kernel", multiplier: 2, minN: 3, keyFn: (row) => row._project_size_key }
 ];
 
 const args = parseArgs(process.argv.slice(2));
@@ -57,7 +56,7 @@ async function main() {
   const indexJson = {
     generated_at: pulledAt,
     calculation_mode: "revised_backtest",
-    method_version: "market-pulse-soft-match-v0.2",
+    method_version: "market-pulse-soft-match-v0.4",
     source_snapshot: snapshotPath,
     scope: {
       type_of_sale: "resale",
@@ -70,12 +69,11 @@ async function main() {
       min_weight_lookback_months: MIN_WEIGHT_LOOKBACK_MONTHS,
       project_weight_cap: PROJECT_WEIGHT_CAP,
       return_winsor_log: RETURN_WINSOR_LOG,
+      floor_kernel_scale: FLOOR_KERNEL_SCALE,
       size_segments: SIZE_SEGMENTS.map(({ key, label, minSqft, maxSqft }) => ({ key, label, minSqft, maxSqft })),
       tiers: [
-        { tier: "project_size_floor", weight_multiplier: 1, min_current_and_previous_rows: 2 },
-        { tier: "project_size", weight_multiplier: 0.75, min_current_and_previous_rows: 3 },
-        { tier: "project", weight_multiplier: 0.5, min_current_and_previous_rows: 4 },
-        { tier: "fallback_cell", weight_multiplier: 0.25, min_current_and_previous_rows: 8 }
+        { tier: "project_size_floor_kernel", weight_multiplier: 2, min_current_and_previous_rows: 3 },
+        { tier: "fallback_cell_floor_kernel", weight_multiplier: 1, min_current_and_previous_rows: 8 }
       ]
     },
     points
@@ -193,7 +191,7 @@ function computeUniversePoints(allRows, months, universe, pulledAt) {
       as_of_date: pulledAt,
       calculation_mode: "revised_backtest",
       provisional: false,
-      method_version: "market-pulse-soft-match-v0.2",
+      method_version: "market-pulse-soft-match-v0.4",
       sample_size: sampleSize,
       confidence,
       price_return_log: nullableRound(priceReturn, 6),
@@ -209,6 +207,8 @@ function computeUniversePoints(allRows, months, universe, pulledAt) {
       fallback_share: nullableRound(result?.fallback_share ?? 0, 4),
       top_project_weight: nullableRound(result?.top_project_weight ?? 0, 4),
       project_count: result?.project_count ?? 0,
+      floor_similarity_avg: nullableRound(result?.floor_similarity_avg ?? null, 4),
+      floor_similarity_p25: nullableRound(result?.floor_similarity_p25 ?? null, 4),
       dispersion: nullableRound(result?.dispersion ?? null, 6),
       tier_atom_counts: result ? JSON.stringify(result.tier_atom_counts) : ""
     });
@@ -225,9 +225,9 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
 
   const tierReturns = new Map();
   for (const tier of TIER_DEFS) {
-    tierReturns.set(tier.tier, buildReturnMap(currentRows, prevRows, tier.keyFn, tier.minN));
+    tierReturns.set(tier.tier, buildKernelReturnMap(currentRows, prevRows, tier.keyFn, tier.minN));
   }
-  const fallbackReturns = buildReturnMap(currentRows, prevRows, universe.fallbackCellKey, 8);
+  const fallbackReturns = buildKernelReturnMap(currentRows, prevRows, universe.fallbackCellKey, 8);
   const atoms = buildAtoms(weightRows);
   const totalAtomWeight = atoms.reduce((sum, atom) => sum + atom.weight, 0);
   if (totalAtomWeight <= 0) return null;
@@ -239,8 +239,10 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
     entries.push({
       atom,
       tier: decision.tier,
-      raw_return: decision.return,
-      return: clamp(decision.return, -RETURN_WINSOR_LOG, RETURN_WINSOR_LOG),
+      raw_return: decision.result.return,
+      return: clamp(decision.result.return, -RETURN_WINSOR_LOG, RETURN_WINSOR_LOG),
+      floor_similarity_avg: decision.result.floor_similarity_avg,
+      floor_similarity_p25: decision.result.floor_similarity_p25,
       base_weight: atom.weight,
       effective_weight: atom.weight * decision.multiplier,
       project: atom.rep._project_key
@@ -265,6 +267,8 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
   const tierAtomCounts = groupCounts(entries, (entry) => entry.tier);
   const returns = cappedEntries.map((entry) => entry.return);
   const medianReturn = median(returns);
+  const floorSimilarityAvg = weightedAverage(cappedEntries, (entry) => entry.floor_similarity_avg, (entry) => entry.capped_weight);
+  const floorSimilarityP25 = weightedPercentile(cappedEntries, (entry) => entry.floor_similarity_p25, (entry) => entry.capped_weight, 0.25);
 
   return {
     return: weightedReturn,
@@ -275,6 +279,8 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
     active_atom_count: entries.length,
     total_atom_count: atoms.length,
     project_count: projectWeights.size,
+    floor_similarity_avg: floorSimilarityAvg,
+    floor_similarity_p25: floorSimilarityP25,
     dispersion: median(returns.map((value) => Math.abs(value - medianReturn))),
     tier_atom_counts: objectFromMap(tierAtomCounts)
   };
@@ -282,26 +288,67 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
 
 function chooseReturn(row, tierReturns, fallbackReturns, fallbackCellKeyFn) {
   for (const tier of TIER_DEFS) {
-    const value = tierReturns.get(tier.tier).get(tier.keyFn(row));
-    if (Number.isFinite(value)) return { tier: tier.tier, return: value, multiplier: tier.multiplier };
+    const result = tierReturns.get(tier.tier).get(tier.keyFn(row));
+    if (result && Number.isFinite(result.return)) return { tier: tier.tier, result, multiplier: tier.multiplier };
   }
   const fallback = fallbackReturns.get(fallbackCellKeyFn(row));
-  if (Number.isFinite(fallback)) return { tier: "fallback_cell", return: fallback, multiplier: 0.25 };
+  if (fallback && Number.isFinite(fallback.return)) return { tier: "fallback_cell", result: fallback, multiplier: 1 };
   return null;
 }
 
-function buildReturnMap(currentRows, prevRows, keyFn, minN) {
+function buildKernelReturnMap(currentRows, prevRows, keyFn, minN) {
   const current = groupRows(currentRows, keyFn);
   const previous = groupRows(prevRows, keyFn);
   const returns = new Map();
   for (const [key, currentGroup] of current.entries()) {
     const prevGroup = previous.get(key);
     if (!prevGroup || currentGroup.length < minN || prevGroup.length < minN) continue;
-    const currentMedian = median(currentGroup.map((row) => row.price_psf));
-    const prevMedian = median(prevGroup.map((row) => row.price_psf));
-    if (currentMedian && prevMedian) returns.set(key, Math.log(currentMedian / prevMedian));
+    const result = floorKernelReturn(currentGroup, prevGroup);
+    if (result) returns.set(key, result);
   }
   return returns;
+}
+
+function floorKernelReturn(currentRows, prevRows) {
+  const prevByFloor = groupRows(prevRows, (row) => row._floor_key);
+  const prevFloors = [...prevByFloor.keys()];
+  const baselineByFloor = new Map();
+  const similarityByFloor = new Map();
+  const rowsByCurrentFloor = groupRows(currentRows, (row) => row._floor_key);
+  const currentReturns = [];
+  const floorSimilarities = [];
+
+  for (const [floorKey, rows] of rowsByCurrentFloor.entries()) {
+    if (!baselineByFloor.has(floorKey)) {
+      const floorMid = rows[0]?._floor_mid ?? null;
+      const weightedPrev = [];
+      let similarityWeight = 0;
+      let similarityTotal = 0;
+      for (const prevFloor of prevFloors) {
+        const prevRowsForFloor = prevByFloor.get(prevFloor) ?? [];
+        const score = floorSimilarity(floorMid, prevRowsForFloor[0]?._floor_mid ?? null);
+        similarityWeight += score * prevRowsForFloor.length;
+        similarityTotal += prevRowsForFloor.length;
+        for (const prevRow of prevRowsForFloor) weightedPrev.push({ value: prevRow.price_psf, weight: score });
+      }
+      baselineByFloor.set(floorKey, weightedMedian(weightedPrev));
+      similarityByFloor.set(floorKey, similarityTotal ? similarityWeight / similarityTotal : null);
+    }
+    const baseline = baselineByFloor.get(floorKey);
+    const similarity = similarityByFloor.get(floorKey);
+    if (!baseline || !Number.isFinite(baseline)) continue;
+    for (const row of rows) {
+      currentReturns.push(Math.log(row.price_psf / baseline));
+      if (Number.isFinite(similarity)) floorSimilarities.push(similarity);
+    }
+  }
+
+  if (!currentReturns.length) return null;
+  return {
+    return: median(currentReturns),
+    floor_similarity_avg: floorSimilarities.length ? floorSimilarities.reduce((sum, value) => sum + value, 0) / floorSimilarities.length : null,
+    floor_similarity_p25: percentile(floorSimilarities, 0.25)
+  };
 }
 
 function buildAtoms(weightRows) {
@@ -354,7 +401,7 @@ function buildSampleAudit(rows, months, points, pulledAt) {
   return {
     generated_at: pulledAt,
     calculation_mode: "revised_backtest",
-    method_version: "market-pulse-soft-match-v0.2",
+    method_version: "market-pulse-soft-match-v0.4",
     target_row_count: rows.length,
     first_month: months[0] ?? null,
     last_month: months.at(-1) ?? null,
@@ -386,27 +433,43 @@ function isTargetScope(row) {
 function enrichRow(row) {
   const sizeKey = sizeSegment(row).key;
   const project = projectKey(row);
-  const floor = floorBand(row);
+  const floorKey = normalizeFloorKey(row.floor_range);
+  const floorMid = floorMidpoint(floorKey);
   return {
     ...row,
     _size_key: sizeKey,
     _project_key: project,
     _project_size_key: `${project}|${sizeKey}`,
-    _floor_key: floor,
-    _atom_key: `${project}|${sizeKey}|${floor}`
+    _floor_key: floorKey,
+    _floor_mid: floorMid,
+    _atom_key: `${project}|${sizeKey}`
   };
 }
 
 function atomKey(row) {
-  return row._atom_key ?? `${projectKey(row)}|${sizeSegment(row).key}|${floorBand(row)}`;
+  return row._atom_key ?? `${projectKey(row)}|${sizeSegment(row).key}`;
 }
 
 function projectKey(row) {
   return `${row.district || "unknown"}|${String(row.project || "").trim().toUpperCase() || "unknown"}`;
 }
 
-function floorBand(row) {
-  return String(row.floor_range || "unknown").trim().toUpperCase() || "unknown";
+function normalizeFloorKey(value) {
+  return String(value || "unknown").trim().toUpperCase() || "unknown";
+}
+
+function floorMidpoint(value) {
+  const text = normalizeFloorKey(value);
+  const match = /^(\d+)-(\d+)$/.exec(text);
+  if (match) return (Number(match[1]) + Number(match[2])) / 2;
+  const basement = /^B(\d+)-B(\d+)$/.exec(text);
+  if (basement) return -((Number(basement[1]) + Number(basement[2])) / 2);
+  return null;
+}
+
+function floorSimilarity(a, b) {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return 0.5;
+  return Math.exp(-Math.abs(a - b) / FLOOR_KERNEL_SCALE);
 }
 
 function sizeSegment(row) {
@@ -467,6 +530,55 @@ function median(values) {
   if (!sorted.length) return null;
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function percentile(values, p) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.floor(p * (sorted.length - 1))));
+  return sorted[index];
+}
+
+function weightedMedian(items) {
+  const sorted = items
+    .filter((item) => Number.isFinite(item.value) && Number.isFinite(item.weight) && item.weight > 0)
+    .sort((a, b) => a.value - b.value);
+  if (!sorted.length) return null;
+  const totalWeight = sorted.reduce((sum, item) => sum + item.weight, 0);
+  let cumulative = 0;
+  for (const item of sorted) {
+    cumulative += item.weight;
+    if (cumulative >= totalWeight / 2) return item.value;
+  }
+  return sorted.at(-1).value;
+}
+
+function weightedAverage(items, valueFn, weightFn) {
+  let totalWeight = 0;
+  let totalValue = 0;
+  for (const item of items) {
+    const value = valueFn(item);
+    const weight = weightFn(item);
+    if (!Number.isFinite(value) || !Number.isFinite(weight) || weight <= 0) continue;
+    totalValue += value * weight;
+    totalWeight += weight;
+  }
+  return totalWeight ? totalValue / totalWeight : null;
+}
+
+function weightedPercentile(items, valueFn, weightFn, p) {
+  const sorted = items
+    .map((item) => ({ value: valueFn(item), weight: weightFn(item) }))
+    .filter((item) => Number.isFinite(item.value) && Number.isFinite(item.weight) && item.weight > 0)
+    .sort((a, b) => a.value - b.value);
+  if (!sorted.length) return null;
+  const totalWeight = sorted.reduce((sum, item) => sum + item.weight, 0);
+  let cumulative = 0;
+  for (const item of sorted) {
+    cumulative += item.weight;
+    if (cumulative >= totalWeight * p) return item.value;
+  }
+  return sorted.at(-1).value;
 }
 
 function isValidMonth(month) {
