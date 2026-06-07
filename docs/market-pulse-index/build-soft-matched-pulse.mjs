@@ -61,7 +61,7 @@ async function main() {
     scope: {
       type_of_sale: ["resale", "new_sale"],
       property_type: ["Condominium", "Apartment"],
-      excluded: ["sub_sale", "Executive Condominium", "landed"]
+      excluded: ["sub_sale", "Executive Condominium", "landed", "resale_multi_unit_bulk_transactions"]
     },
     parameters: {
       window_months: WINDOW_MONTHS,
@@ -72,7 +72,7 @@ async function main() {
       floor_kernel_scale: FLOOR_KERNEL_SCALE,
       size_segments: SIZE_SEGMENTS.map(({ key, label, minSqft, maxSqft }) => ({ key, label, minSqft, maxSqft })),
       resale_tiers: [
-        { tier: "project_size_floor_kernel", weight_multiplier: 2, min_current_and_previous_rows: 3 },
+        { tier: "project_size_floor_kernel", weight_multiplier: 2, min_current_and_previous_rows: 3, project_key: "district_project_street" },
         { tier: "fallback_cell_floor_kernel", weight_multiplier: 1, min_current_and_previous_rows: 8 }
       ],
       new_sale_tiers: [
@@ -174,7 +174,8 @@ function computeUniversePoints(allRows, months, universe, pulledAt) {
   const rows = allRows.filter(universe.filter);
   const rowsByMonth = groupRows(rows, (row) => row.contract_month);
   const points = [];
-  let index = null;
+  let rawIndex = null;
+  let publicIndex = null;
 
   for (let i = WINDOW_MONTHS; i < months.length; i++) {
     const endMonth = months[i];
@@ -193,8 +194,11 @@ function computeUniversePoints(allRows, months, universe, pulledAt) {
       : null;
     const confidence = confidenceFor(sampleSize, result);
     const priceReturn = result?.return ?? null;
-    const priceIndex = priceReturn === null || confidence === "None" ? null : index === null ? 100 : index * Math.exp(priceReturn);
-    if (priceIndex !== null) index = priceIndex;
+    const nextRawIndex = priceReturn === null ? null : rawIndex === null ? 100 : rawIndex * Math.exp(priceReturn);
+    if (nextRawIndex !== null) rawIndex = nextRawIndex;
+    const priceIndex = priceReturn === null || confidence === "None" ? null : publicIndex === null ? 100 : publicIndex * Math.exp(priceReturn);
+    if (priceIndex !== null) publicIndex = priceIndex;
+    else publicIndex = null;
 
     points.push({
       index_key: universe.key,
@@ -214,6 +218,7 @@ function computeUniversePoints(allRows, months, universe, pulledAt) {
       confidence,
       price_return_log: nullableRound(priceReturn, 6),
       rolling_momentum_pct: nullableRound(priceReturn === null ? null : Math.expm1(priceReturn) * 100, 3),
+      raw_chained_index: nullableRound(nextRawIndex, 3),
       price_index: nullableRound(priceIndex, 3),
       liquidity_index: nullableRound(liquidity.index, 3),
       transaction_count: liquidity.currentCount,
@@ -450,18 +455,19 @@ function buildAtoms(weightRows) {
 }
 
 function capProjectWeights(entries) {
-  const total = entries.reduce((sum, entry) => sum + entry.effective_weight, 0);
-  const maxProjectWeight = total * PROJECT_WEIGHT_CAP;
   const byProject = groupSum(entries, (entry) => entry.project, (entry) => entry.effective_weight);
+  const cappedProjectWeights = capWeights(byProject, PROJECT_WEIGHT_CAP);
   return entries.map((entry) => {
     const projectWeight = byProject.get(entry.project) ?? 0;
-    const scale = projectWeight > maxProjectWeight ? maxProjectWeight / projectWeight : 1;
+    const cappedProjectWeight = cappedProjectWeights.get(entry.project) ?? 0;
+    const scale = projectWeight > 0 ? cappedProjectWeight / projectWeight : 0;
     return { ...entry, capped_weight: entry.effective_weight * scale };
   });
 }
 
 function confidenceFor(sampleSize, result) {
   if (!result || sampleSize < 25 || result.coverage < 0.25) return "None";
+  if (result.top_project_weight > PROJECT_WEIGHT_CAP + 0.0005) return "None";
   if (sampleSize < 50 || result.coverage < 0.4 || result.matched_coverage < 0.25 || result.top_project_weight > 0.35) return "Low";
   if (sampleSize < 100 || result.coverage < 0.55 || result.matched_coverage < 0.45 || result.top_project_weight > 0.25) return "Medium";
   return "High";
@@ -506,6 +512,7 @@ function latestByKey(points) {
 function isTargetScope(row) {
   return (
     (row.type_of_sale === "resale" || row.type_of_sale === "new_sale") &&
+    (row.type_of_sale !== "resale" || row.no_of_units === 1) &&
     (row.property_type === "Condominium" || row.property_type === "Apartment") &&
     isValidMonth(row.contract_month) &&
     row.area_sqm > 0 &&
@@ -535,11 +542,15 @@ function atomKey(row) {
 }
 
 function projectKey(row) {
-  return `${row.district || "unknown"}|${String(row.project || "").trim().toUpperCase() || "unknown"}`;
+  return `${row.district || "unknown"}|${canonicalText(row.project) || "unknown"}|${canonicalText(row.street) || "unknown"}`;
 }
 
 function normalizeFloorKey(value) {
   return String(value || "unknown").trim().toUpperCase() || "unknown";
+}
+
+function canonicalText(value) {
+  return String(value ?? "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
 function floorMidpoint(value) {
@@ -607,6 +618,40 @@ function groupSum(rows, keyFn, valueFn) {
     map.set(key, (map.get(key) ?? 0) + (valueFn(row) || 0));
   }
   return map;
+}
+
+function capWeights(weightByKey, capShare) {
+  const total = [...weightByKey.values()].reduce((sum, value) => sum + value, 0);
+  if (total <= 0 || capShare <= 0) return new Map([...weightByKey.keys()].map((key) => [key, 0]));
+
+  const absoluteCap = total * capShare;
+  const capped = new Map();
+  const remaining = new Map([...weightByKey.entries()].filter(([, value]) => value > 0));
+  let remainingOriginalWeight = total;
+  let remainingCappedWeight = total;
+
+  while (remaining.size) {
+    const newlyCapped = [];
+    for (const [key, weight] of remaining.entries()) {
+      const redistributedWeight = remainingOriginalWeight > 0 ? (remainingCappedWeight * weight) / remainingOriginalWeight : 0;
+      if (redistributedWeight > absoluteCap) newlyCapped.push([key, weight]);
+    }
+    if (!newlyCapped.length) break;
+
+    for (const [key, weight] of newlyCapped) {
+      capped.set(key, absoluteCap);
+      remaining.delete(key);
+      remainingOriginalWeight -= weight;
+      remainingCappedWeight -= absoluteCap;
+    }
+    if (remainingOriginalWeight <= 0 || remainingCappedWeight <= 0) break;
+  }
+
+  for (const [key, weight] of remaining.entries()) {
+    const redistributedWeight = remainingOriginalWeight > 0 ? (remainingCappedWeight * weight) / remainingOriginalWeight : 0;
+    capped.set(key, redistributedWeight);
+  }
+  return capped;
 }
 
 function median(values) {

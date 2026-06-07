@@ -129,15 +129,19 @@ function prepareChart(chart, points) {
     const base = rows[0]?.price_index ?? null;
     return {
       ...definition,
-      points: rows.map((point) => ({
-        month: point.period_end_month,
-        rebased: base ? (100 * point.price_index) / base : null,
-        confidence: point.confidence,
-        sample_size: point.sample_size,
-        matched_coverage: point.matched_coverage,
-        fallback_share: point.fallback_share,
-        floor_similarity_avg: point.floor_similarity_avg
-      })).filter((point) => Number.isFinite(point.rebased))
+      points: rows
+        .map((point) => {
+          return {
+            month: point.period_end_month,
+            rebased: base ? (100 * point.price_index) / base : null,
+            confidence: point.confidence,
+            sample_size: point.sample_size,
+            matched_coverage: point.matched_coverage,
+            fallback_share: point.fallback_share,
+            floor_similarity_avg: point.floor_similarity_avg
+          };
+        })
+        .filter((point) => Number.isFinite(point.rebased))
     };
   });
   const months = [...new Set(series.flatMap((item) => item.points.map((point) => point.month)))].sort();
