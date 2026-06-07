@@ -59,9 +59,9 @@ async function main() {
     method_version: "market-pulse-soft-match-v0.4",
     source_snapshot: snapshotPath,
     scope: {
-      type_of_sale: "resale",
+      type_of_sale: ["resale", "new_sale"],
       property_type: ["Condominium", "Apartment"],
-      excluded: ["new_sale", "sub_sale", "Executive Condominium", "landed"]
+      excluded: ["sub_sale", "Executive Condominium", "landed"]
     },
     parameters: {
       window_months: WINDOW_MONTHS,
@@ -109,45 +109,54 @@ async function main() {
 function buildUniverses(rows, options = {}) {
   const districts = unique(rows.map((row) => row.district).filter(Boolean)).sort();
   const segments = unique(rows.map((row) => row.market_segment).filter(Boolean)).sort();
-  const universes = [
-    {
-      key: "SG_CONDO_RESALE_OVERALL",
+  const saleTypes = ["resale", "new_sale"];
+  const universes = [];
+
+  for (const saleType of saleTypes) {
+    const prefix = saleType === "resale" ? "SG_CONDO_RESALE" : "SG_CONDO_NEW_SALE";
+    const saleLabel = saleType === "resale" ? "resale" : "new_sale";
+    universes.push({
+      key: `${prefix}_OVERALL`,
       type: "overall",
-      filter: () => true,
+      sale_type: saleLabel,
+      filter: (row) => row.type_of_sale === saleType,
       fallbackCellKey: (row) => `${row.market_segment || "unknown"}|${row._size_key}`
+    });
+
+    for (const segment of segments) {
+      universes.push({
+        key: `${prefix}_${segment}`,
+        type: "market_segment",
+        sale_type: saleLabel,
+        market_segment: segment,
+        filter: (row) => row.type_of_sale === saleType && row.market_segment === segment,
+        fallbackCellKey: (row) => `${row.district || "unknown"}|${row._size_key}`
+      });
     }
-  ];
 
-  for (const segment of segments) {
-    universes.push({
-      key: `SG_CONDO_RESALE_${segment}`,
-      type: "market_segment",
-      market_segment: segment,
-      filter: (row) => row.market_segment === segment,
-      fallbackCellKey: (row) => `${row.district || "unknown"}|${row._size_key}`
-    });
-  }
+    if (options.coreOnly) continue;
 
-  if (options.coreOnly) return universes;
+    for (const district of districts) {
+      universes.push({
+        key: `${prefix}_D${district}`,
+        type: "district",
+        sale_type: saleLabel,
+        district,
+        filter: (row) => row.type_of_sale === saleType && row.district === district,
+        fallbackCellKey: (row) => row._size_key
+      });
+    }
 
-  for (const district of districts) {
-    universes.push({
-      key: `SG_CONDO_RESALE_D${district}`,
-      type: "district",
-      district,
-      filter: (row) => row.district === district,
-      fallbackCellKey: (row) => row._size_key
-    });
-  }
-
-  for (const segment of SIZE_SEGMENTS) {
-    universes.push({
-      key: `SG_CONDO_RESALE_SIZE_${segment.key.toUpperCase()}`,
-      type: "size_segment",
-      size_segment: segment.key,
-      filter: (row) => row._size_key === segment.key,
-      fallbackCellKey: (row) => row.market_segment || "unknown"
-    });
+    for (const segment of SIZE_SEGMENTS) {
+      universes.push({
+        key: `${prefix}_SIZE_${segment.key.toUpperCase()}`,
+        type: "size_segment",
+        sale_type: saleLabel,
+        size_segment: segment.key,
+        filter: (row) => row.type_of_sale === saleType && row._size_key === segment.key,
+        fallbackCellKey: (row) => row.market_segment || "unknown"
+      });
+    }
   }
 
   return universes;
@@ -185,6 +194,7 @@ function computeUniversePoints(allRows, months, universe, pulledAt) {
       market_segment: universe.market_segment ?? "",
       district: universe.district ?? "",
       size_segment: universe.size_segment ?? "",
+      sale_type: universe.sale_type ?? "",
       period_end_month: endMonth,
       window_start_month: windowMonths[0],
       window_end_month: windowMonths.at(-1),
@@ -421,7 +431,7 @@ function latestByKey(points) {
 
 function isTargetScope(row) {
   return (
-    row.type_of_sale === "resale" &&
+    (row.type_of_sale === "resale" || row.type_of_sale === "new_sale") &&
     (row.property_type === "Condominium" || row.property_type === "Apartment") &&
     isValidMonth(row.contract_month) &&
     row.area_sqm > 0 &&

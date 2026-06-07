@@ -63,9 +63,12 @@ The script writes:
 - `output/soft-matched-ura-comparison.csv`
 - `output/soft-matched-ura-comparison.json`
 - `output/soft-matched-ura-comparison.svg`
-- `output/soft-matched-by-size.svg`
-- `output/soft-matched-by-region.svg`
-- `output/soft-matched-key-districts.svg`
+- `output/soft-matched-resale-by-size.svg`
+- `output/soft-matched-resale-by-region.svg`
+- `output/soft-matched-resale-key-districts.svg`
+- `output/soft-matched-new-sale-by-size.svg`
+- `output/soft-matched-new-sale-by-region.svg`
+- `output/soft-matched-new-sale-key-districts.svg`
 - `output/ura-comparison.csv`
 - `output/ura-comparison.json`
 - `output/ura-comparison.svg`
@@ -87,17 +90,19 @@ The v0.4 prototype reduces within-cell quality drift without fitting a hedonic r
 
 If the same project cannot be matched within the same size band, the atom uses the fallback cell instead of project-only movement. Floor range is not an exact-match requirement; it is converted to a midpoint and used as a soft distance score when matching current-window transactions to previous-window transactions. Weights come from transactions before the current window, so the method does not use future or current-window composition as the basket. A single project is capped at 15% effective weight. Each output point includes matched coverage, fallback share, top project weight, floor similarity, sample size, and confidence.
 
+The same method is computed separately for `resale` and `new_sale`, so users can distinguish secondary-market movement from new-launch mix and pricing.
+
 ## Scope
 
 Included:
 
 - URA `PMI_Resi_Transaction`
-- resale only
+- resale
+- new sale
 - `Condominium` and `Apartment`
 
 Excluded:
 
-- new sale
 - sub sale
 - Executive Condominium
 - landed

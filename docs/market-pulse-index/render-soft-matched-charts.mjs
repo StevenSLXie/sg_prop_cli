@@ -10,8 +10,8 @@ const END_MONTH = "2026-05";
 
 const CHARTS = [
   {
-    filename: "soft-matched-by-size.svg",
-    title: "Soft Matched Market Pulse by Size",
+    filename: "soft-matched-resale-by-size.svg",
+    title: "Soft Matched Resale Market Pulse by Size",
     subtitle: "Resale condo/apartment, monthly 3M rolling points, rebased to first available 2022 point = 100.",
     series: [
       { key: "SG_CONDO_RESALE_SIZE_COMPACT", label: "<=800 sqft", color: "#2563eb" },
@@ -20,8 +20,8 @@ const CHARTS = [
     ]
   },
   {
-    filename: "soft-matched-by-region.svg",
-    title: "Soft Matched Market Pulse by Region",
+    filename: "soft-matched-resale-by-region.svg",
+    title: "Soft Matched Resale Market Pulse by Region",
     subtitle: "CCR, RCR and OCR resale condo/apartment trends, rebased to first available 2022 point = 100.",
     series: [
       { key: "SG_CONDO_RESALE_CCR", label: "CCR", color: "#7c3aed" },
@@ -30,9 +30,9 @@ const CHARTS = [
     ]
   },
   {
-    filename: "soft-matched-key-districts.svg",
-    title: "Soft Matched Market Pulse by Key District",
-    subtitle: "Selected liquid districts, rebased to first available 2022 point = 100.",
+    filename: "soft-matched-resale-key-districts.svg",
+    title: "Soft Matched Resale Market Pulse by Key District",
+    subtitle: "Selected liquid resale districts, rebased to first available 2022 point = 100.",
     series: [
       { key: "SG_CONDO_RESALE_D05", label: "D05 Buona Vista / West Coast", color: "#2563eb" },
       { key: "SG_CONDO_RESALE_D09", label: "D09 Orchard / River Valley", color: "#9333ea" },
@@ -43,8 +43,49 @@ const CHARTS = [
       { key: "SG_CONDO_RESALE_D21", label: "D21 Clementi / Upper Bukit Timah", color: "#0891b2" },
       { key: "SG_CONDO_RESALE_D23", label: "D23 Bukit Batok / Choa Chu Kang", color: "#65a30d" }
     ]
+  },
+  {
+    filename: "soft-matched-new-sale-by-size.svg",
+    title: "Soft Matched New Sale Market Pulse by Size",
+    subtitle: "New sale condo/apartment, monthly 3M rolling points, rebased to first available 2022 point = 100.",
+    series: [
+      { key: "SG_CONDO_NEW_SALE_SIZE_COMPACT", label: "<=800 sqft", color: "#2563eb" },
+      { key: "SG_CONDO_NEW_SALE_SIZE_FAMILY", label: "800-1200 sqft", color: "#0f766e" },
+      { key: "SG_CONDO_NEW_SALE_SIZE_LARGE", label: ">1200 sqft", color: "#c2410c" }
+    ]
+  },
+  {
+    filename: "soft-matched-new-sale-by-region.svg",
+    title: "Soft Matched New Sale Market Pulse by Region",
+    subtitle: "CCR, RCR and OCR new sale condo/apartment trends, rebased to first available 2022 point = 100.",
+    series: [
+      { key: "SG_CONDO_NEW_SALE_CCR", label: "CCR", color: "#7c3aed" },
+      { key: "SG_CONDO_NEW_SALE_RCR", label: "RCR", color: "#0f766e" },
+      { key: "SG_CONDO_NEW_SALE_OCR", label: "OCR", color: "#c2410c" }
+    ]
+  },
+  {
+    filename: "soft-matched-new-sale-key-districts.svg",
+    title: "Soft Matched New Sale Market Pulse by Key District",
+    subtitle: "Selected new sale districts with enough usable points, rebased to first available 2022 point = 100.",
+    series: [
+      { key: "SG_CONDO_NEW_SALE_D05", label: "D05 Buona Vista / West Coast", color: "#2563eb" },
+      { key: "SG_CONDO_NEW_SALE_D09", label: "D09 Orchard / River Valley", color: "#9333ea" },
+      { key: "SG_CONDO_NEW_SALE_D10", label: "D10 Tanglin / Holland / Bukit Timah", color: "#4f46e5" },
+      { key: "SG_CONDO_NEW_SALE_D15", label: "D15 Katong / Joo Chiat / Amber", color: "#0f766e" },
+      { key: "SG_CONDO_NEW_SALE_D18", label: "D18 Tampines / Pasir Ris", color: "#ea580c" },
+      { key: "SG_CONDO_NEW_SALE_D19", label: "D19 Serangoon / Hougang / Punggol", color: "#dc2626" },
+      { key: "SG_CONDO_NEW_SALE_D21", label: "D21 Clementi / Upper Bukit Timah", color: "#0891b2" },
+      { key: "SG_CONDO_NEW_SALE_D23", label: "D23 Bukit Batok / Choa Chu Kang", color: "#65a30d" }
+    ]
   }
 ];
+
+const LEGACY_ALIASES = {
+  "soft-matched-resale-by-size.svg": "soft-matched-by-size.svg",
+  "soft-matched-resale-by-region.svg": "soft-matched-by-region.svg",
+  "soft-matched-resale-key-districts.svg": "soft-matched-key-districts.svg"
+};
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.stack || error.message : error);
@@ -58,7 +99,11 @@ async function main() {
   const summaries = [];
   for (const chart of CHARTS) {
     const prepared = prepareChart(chart, index.points);
-    await writeFile(join(OUT_DIR, chart.filename), renderSvg(chart, prepared), "utf8");
+    const svg = renderSvg(chart, prepared);
+    await writeFile(join(OUT_DIR, chart.filename), svg, "utf8");
+    if (LEGACY_ALIASES[chart.filename]) {
+      await writeFile(join(OUT_DIR, LEGACY_ALIASES[chart.filename]), svg, "utf8");
+    }
     outputs.push(join(OUT_DIR, chart.filename));
     summaries.push({
       chart: chart.filename,
@@ -143,7 +188,7 @@ function renderSvg(chart, prepared) {
   ${lines}
   ${labels}
   ${legend}
-  <text x="${pad.left}" y="${height - 18}" font-size="12" fill="#6b7280">Method: soft matched-basket v0.4, project x size hard match, floor-distance kernel, resale condominium/apartment only.</text>
+  <text x="${pad.left}" y="${height - 18}" font-size="12" fill="#6b7280">Method: soft matched-basket v0.4, project x size hard match, floor-distance kernel, condominium/apartment only.</text>
 </svg>
 `;
 }

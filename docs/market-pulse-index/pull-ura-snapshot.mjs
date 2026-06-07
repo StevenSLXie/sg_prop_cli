@@ -113,7 +113,7 @@ function normalizeSaleRow(wrapper) {
 
 function isTargetScope(row) {
   return (
-    row.type_of_sale === "resale" &&
+    (row.type_of_sale === "resale" || row.type_of_sale === "new_sale") &&
     (row.property_type === "Condominium" || row.property_type === "Apartment") &&
     /^\d{4}-\d{2}$/.test(row.contract_month) &&
     row.area_sqm > 0 &&
@@ -184,7 +184,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Pull normalized URA resale condo/apartment transaction snapshot
+  console.log(`Pull normalized URA new sale and resale condo/apartment transaction snapshot
 
 Usage:
   node docs/market-pulse-index/pull-ura-snapshot.mjs [options]
