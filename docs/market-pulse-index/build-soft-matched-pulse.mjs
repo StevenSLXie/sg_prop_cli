@@ -19,6 +19,13 @@ const SIZE_SEGMENTS = [
   { key: "large", label: ">1200 sqft", minSqft: 1200, maxSqft: Infinity }
 ];
 
+const LEASE_AGE_BUCKETS = [
+  { key: "age_0_10", label: "<=10 years", minYears: 0, maxYears: 10 },
+  { key: "age_11_20", label: "11-20 years", minYears: 11, maxYears: 20 },
+  { key: "age_21_30", label: "21-30 years", minYears: 21, maxYears: 30 },
+  { key: "age_30_plus", label: ">30 years", minYears: 31, maxYears: Infinity }
+];
+
 const RESALE_TIER_DEFS = [
   { tier: "project_size_floor_kernel", multiplier: 1, minN: 3, keyFn: (row) => row._project_size_key }
 ];
@@ -71,6 +78,7 @@ async function main() {
       return_winsor_log: RETURN_WINSOR_LOG,
       floor_kernel_scale: FLOOR_KERNEL_SCALE,
       size_segments: SIZE_SEGMENTS.map(({ key, label, minSqft, maxSqft }) => ({ key, label, minSqft, maxSqft })),
+      lease_age_buckets: LEASE_AGE_BUCKETS.map(({ key, label, minYears, maxYears }) => ({ key, label, minYears, maxYears })),
       tenure_buckets: ["freehold_999", "leasehold", "unknown"],
       resale_tiers: [
         { tier: "project_size_floor_kernel", weight_multiplier: 1, min_current_and_previous_rows: 3, project_key: "district_project_street" },
@@ -178,6 +186,23 @@ function buildUniverses(rows, options = {}) {
         ]
       });
     }
+
+    if (saleType === "resale") {
+      for (const bucket of LEASE_AGE_BUCKETS) {
+        universes.push({
+          key: `${prefix}_LEASE_${bucket.key.toUpperCase()}`,
+          type: "lease_age_bucket",
+          sale_type: saleLabel,
+          lease_age_bucket: bucket.key,
+          tiers,
+          filter: (row) => row.type_of_sale === saleType && row._lease_age_bucket === bucket.key,
+          fallbackCellKeys: [
+            (row) => `${row.district || "unknown"}|${row._size_key}`,
+            (row) => `${row.market_segment || "unknown"}|${row._size_key}`
+          ]
+        });
+      }
+    }
   }
 
   return universes;
@@ -221,6 +246,7 @@ function computeUniversePoints(allRows, months, universe, pulledAt) {
       market_segment: universe.market_segment ?? "",
       district: universe.district ?? "",
       size_segment: universe.size_segment ?? "",
+      lease_age_bucket: universe.lease_age_bucket ?? "",
       sale_type: universe.sale_type ?? "",
       period_end_month: endMonth,
       window_start_month: windowMonths[0],
@@ -617,6 +643,8 @@ function isTargetScope(row) {
 function enrichRow(row) {
   const sizeKey = sizeSegment(row).key;
   const tenureKey = tenureBucket(row.tenure);
+  const leaseStartYear = leaseCommencementYear(row.tenure);
+  const leaseAgeBucketKey = leaseAgeBucket(row.contract_month, leaseStartYear)?.key ?? "unknown";
   const project = projectKey(row);
   const floorKey = normalizeFloorKey(row.floor_range);
   const floorMid = floorMidpoint(floorKey);
@@ -624,6 +652,8 @@ function enrichRow(row) {
     ...row,
     _size_key: sizeKey,
     _tenure_bucket: tenureKey,
+    _lease_start_year: leaseStartYear,
+    _lease_age_bucket: leaseAgeBucketKey,
     _project_key: project,
     _project_size_key: `${project}|${sizeKey}`,
     _floor_key: floorKey,
@@ -653,6 +683,20 @@ function tenureBucket(value) {
   if (!text || text === "-") return "unknown";
   if (text.includes("FREEHOLD") || /\b999\s*YRS\b/.test(text)) return "freehold_999";
   return "leasehold";
+}
+
+function leaseCommencementYear(value) {
+  const text = canonicalText(value);
+  const match = /\bCOMMENCING FROM\s+(\d{4})\b/.exec(text);
+  return match ? Number(match[1]) : null;
+}
+
+function leaseAgeBucket(contractMonth, leaseStartYear) {
+  if (!Number.isInteger(leaseStartYear) || !isValidMonth(contractMonth)) return null;
+  const contractYear = Number(contractMonth.slice(0, 4));
+  const age = contractYear - leaseStartYear;
+  if (age < 0) return null;
+  return LEASE_AGE_BUCKETS.find((bucket) => age >= bucket.minYears && age <= bucket.maxYears) ?? null;
 }
 
 function floorMidpoint(value) {

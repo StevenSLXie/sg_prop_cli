@@ -20,6 +20,17 @@ const CHARTS = [
     ]
   },
   {
+    filename: "soft-matched-resale-by-lease-age.svg",
+    title: "Soft Matched Resale Market Pulse by Lease Age",
+    subtitle: "Leasehold resale condo/apartment, grouped by years since lease commencement; TOP year is not available in the transaction feed.",
+    series: [
+      { key: "SG_CONDO_RESALE_LEASE_AGE_0_10", label: "<=10 years", color: "#2563eb" },
+      { key: "SG_CONDO_RESALE_LEASE_AGE_11_20", label: "11-20 years", color: "#0f766e" },
+      { key: "SG_CONDO_RESALE_LEASE_AGE_21_30", label: "21-30 years", color: "#c2410c" },
+      { key: "SG_CONDO_RESALE_LEASE_AGE_30_PLUS", label: ">30 years", color: "#7c3aed" }
+    ]
+  },
+  {
     filename: "soft-matched-resale-by-region.svg",
     title: "Soft Matched Resale Market Pulse by Region",
     subtitle: "CCR, RCR and OCR resale condo/apartment trends, rebased to first available 2022 point = 100.",
