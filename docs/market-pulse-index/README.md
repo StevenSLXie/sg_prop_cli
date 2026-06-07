@@ -14,6 +14,12 @@ Compare quarter-end results against URA/SingStat official non-landed indexes:
 node docs/market-pulse-index/compare-with-ura.mjs
 ```
 
+Compare the prototype against URA and SRX public monthly market movements:
+
+```bash
+node docs/market-pulse-index/compare-three-indexes.mjs
+```
+
 Optional flags:
 
 ```bash
@@ -33,9 +39,14 @@ The script writes:
 - `output/ura-comparison.csv`
 - `output/ura-comparison.json`
 - `output/ura-comparison.svg`
+- `output/three-index-comparison.csv`
+- `output/three-index-comparison.json`
+- `output/three-index-comparison.svg`
 - `output/normalized-snapshot.json` when `--save-snapshot` is set
 
 Historical runs from the current URA proxy are labelled `revised_backtest`, because the proxy does not expose historical as-of snapshots. Live production publication requires storing monthly snapshots going forward.
+
+The SRX comparison uses `srx-monthly-public.csv`, which records monthly percentage changes from SRX research articles and chains them into a relative index. It is a public-source proxy rather than a raw SRX index-value pull, because SRX's index-value table is not exposed through the same stable public API pattern as URA/data.gov.sg.
 
 ## Scope
 
