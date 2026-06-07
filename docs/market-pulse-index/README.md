@@ -14,7 +14,7 @@ Pull only the normalized URA transaction snapshot:
 node docs/market-pulse-index/pull-ura-snapshot.mjs
 ```
 
-Build the soft matched-basket v0.4 prototype from the snapshot:
+Build the soft matched-basket v0.5 prototype from the snapshot:
 
 ```bash
 node docs/market-pulse-index/build-soft-matched-pulse.mjs --core-only
@@ -81,14 +81,14 @@ Historical runs from the current URA proxy are labelled `revised_backtest`, beca
 
 The SRX comparison uses `srx-monthly-public.csv`, which records monthly percentage changes from SRX research articles and chains them into a relative index. It is a public-source proxy rather than a raw SRX index-value pull, because SRX's index-value table is not exposed through the same stable public API pattern as URA/data.gov.sg.
 
-## Soft Matched-Basket v0.4
+## Soft Matched-Basket v0.5
 
-The v0.4 prototype reduces within-cell quality drift without fitting a hedonic regression. For resale, it uses trailing historical basket weights and chooses the best available matched return for each historical atom:
+The v0.5 prototype reduces within-cell quality drift without fitting a hedonic regression. For resale, it uses trailing historical basket weights and chooses the best available matched return for each historical atom:
 
 - `project x size` with floor-distance kernel, weight multiplier `2.00`
 - fallback universe cell with floor-distance kernel, weight multiplier `1.00`
 
-If the same project cannot be matched within the same size band, the atom uses the fallback cell instead of project-only movement. Project matching uses `district x project x street` to avoid linking generic project names across unrelated streets. Floor range is not an exact-match requirement; it is converted to a midpoint and used as a soft distance score when matching current-window transactions to previous-window transactions. Weights come from transactions before the current window, so the method does not use future or current-window composition as the basket. A single project is capped at 15% effective weight after redistribution. Resale excludes multi-unit or bulk transactions where `no_of_units` is not `1`. Each output point includes matched coverage, fallback share, top project weight, floor similarity, sample size, confidence, and a diagnostic raw chain. Public charts and `price_index` use only confidence-gated points; the raw chain is not used as a published index.
+If the same project cannot be matched within the same size band, the atom uses the fallback cell instead of project-only movement. Project matching uses `district x project x street` to avoid linking generic project names across unrelated streets. Fallback cells prefer `universe cell x size x tenure bucket`, where `freehold` and `999-year` rows are separated from shorter leasehold rows, then fall back to the same cell without tenure only when the tenure-specific cell is too sparse. Floor range is not an exact-match requirement; it is converted to a midpoint and used as a soft distance score when matching current-window transactions to previous-window transactions. Weights come from transactions before the current window, so the method does not use future or current-window composition as the basket. A single project is capped at 15% effective weight after redistribution. For district-level resale indexes, fallback effective weight is capped at 45% whenever same-project evidence exists, because district cells are most exposed to within-district project mix drift. Resale points with almost no matched support are withheld from the public index. Resale excludes multi-unit or bulk transactions where `no_of_units` is not `1`. Each output point includes matched coverage, fallback share, top project weight, floor similarity, sample size, confidence, public segment id, and a diagnostic raw chain. Public charts and `price_index` use only confidence-gated points; the raw chain is not used as a published index.
 
 The same method is computed separately for `resale` and `new_sale`, so users can distinguish secondary-market movement from new-launch mix and pricing.
 

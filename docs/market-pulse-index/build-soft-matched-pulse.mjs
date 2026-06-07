@@ -10,6 +10,7 @@ const WINDOW_MONTHS = 3;
 const WEIGHT_LOOKBACK_MONTHS = 24;
 const MIN_WEIGHT_LOOKBACK_MONTHS = 6;
 const PROJECT_WEIGHT_CAP = 0.15;
+const FALLBACK_WEIGHT_CAP = 0.45;
 const RETURN_WINSOR_LOG = 0.12;
 const FLOOR_KERNEL_SCALE = 10;
 
@@ -56,7 +57,7 @@ async function main() {
   const indexJson = {
     generated_at: pulledAt,
     calculation_mode: "revised_backtest",
-    method_version: "market-pulse-soft-match-v0.4",
+    method_version: "market-pulse-soft-match-v0.5",
     source_snapshot: snapshotPath,
     scope: {
       type_of_sale: ["resale", "new_sale"],
@@ -68,12 +69,14 @@ async function main() {
       weight_lookback_months: WEIGHT_LOOKBACK_MONTHS,
       min_weight_lookback_months: MIN_WEIGHT_LOOKBACK_MONTHS,
       project_weight_cap: PROJECT_WEIGHT_CAP,
+      fallback_weight_cap: FALLBACK_WEIGHT_CAP,
       return_winsor_log: RETURN_WINSOR_LOG,
       floor_kernel_scale: FLOOR_KERNEL_SCALE,
       size_segments: SIZE_SEGMENTS.map(({ key, label, minSqft, maxSqft }) => ({ key, label, minSqft, maxSqft })),
+      tenure_buckets: ["freehold_999", "leasehold", "unknown"],
       resale_tiers: [
         { tier: "project_size_floor_kernel", weight_multiplier: 2, min_current_and_previous_rows: 3, project_key: "district_project_street" },
-        { tier: "fallback_cell_floor_kernel", weight_multiplier: 1, min_current_and_previous_rows: 8 }
+        { tier: "fallback_cell_floor_kernel", weight_multiplier: 1, min_current_and_previous_rows: 8, primary_cell: "universe_cell_tenure", secondary_cell: "universe_cell" }
       ],
       new_sale_tiers: [
         { tier: "fallback_cell_floor_kernel", weight_multiplier: 1, min_current_and_previous_rows: 8 }
@@ -125,7 +128,10 @@ function buildUniverses(rows, options = {}) {
       sale_type: saleLabel,
       tiers,
       filter: (row) => row.type_of_sale === saleType,
-      fallbackCellKey: (row) => `${row.district || "unknown"}|${row._size_key}`
+      fallbackCellKeys: [
+        (row) => `${row.district || "unknown"}|${row._size_key}|${row._tenure_bucket}`,
+        (row) => `${row.district || "unknown"}|${row._size_key}`
+      ]
     });
 
     for (const segment of segments) {
@@ -136,7 +142,10 @@ function buildUniverses(rows, options = {}) {
         market_segment: segment,
         tiers,
         filter: (row) => row.type_of_sale === saleType && row.market_segment === segment,
-        fallbackCellKey: (row) => `${row.district || "unknown"}|${row._size_key}`
+        fallbackCellKeys: [
+          (row) => `${row.district || "unknown"}|${row._size_key}|${row._tenure_bucket}`,
+          (row) => `${row.district || "unknown"}|${row._size_key}`
+        ]
       });
     }
 
@@ -150,7 +159,10 @@ function buildUniverses(rows, options = {}) {
         district,
         tiers,
         filter: (row) => row.type_of_sale === saleType && row.district === district,
-        fallbackCellKey: (row) => row._size_key
+        fallbackCellKeys: [
+          (row) => `${row._size_key}|${row._tenure_bucket}`,
+          (row) => row._size_key
+        ]
       });
     }
 
@@ -162,7 +174,10 @@ function buildUniverses(rows, options = {}) {
         size_segment: segment.key,
         tiers,
         filter: (row) => row.type_of_sale === saleType && row._size_key === segment.key,
-        fallbackCellKey: (row) => row.market_segment || "unknown"
+        fallbackCellKeys: [
+          (row) => `${row.market_segment || "unknown"}|${row._tenure_bucket}`,
+          (row) => row.market_segment || "unknown"
+        ]
       });
     }
   }
@@ -176,6 +191,7 @@ function computeUniversePoints(allRows, months, universe, pulledAt) {
   const points = [];
   let rawIndex = null;
   let publicIndex = null;
+  let publicSegment = 0;
 
   for (let i = WINDOW_MONTHS; i < months.length; i++) {
     const endMonth = months[i];
@@ -192,13 +208,14 @@ function computeUniversePoints(allRows, months, universe, pulledAt) {
     const result = weightMonths.length >= MIN_WEIGHT_LOOKBACK_MONTHS
       ? computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindowMonths, weightMonths)
       : null;
-    const confidence = confidenceFor(sampleSize, result);
+    const confidence = confidenceFor(sampleSize, result, universe);
     const priceReturn = result?.return ?? null;
     const nextRawIndex = priceReturn === null ? null : rawIndex === null ? 100 : rawIndex * Math.exp(priceReturn);
     if (nextRawIndex !== null) rawIndex = nextRawIndex;
-    const priceIndex = priceReturn === null || confidence === "None" ? null : publicIndex === null ? 100 : publicIndex * Math.exp(priceReturn);
+    const startsNewSegment = priceReturn !== null && confidence !== "None" && publicIndex === null;
+    if (startsNewSegment) publicSegment += 1;
+    const priceIndex = priceReturn === null || confidence === "None" ? null : startsNewSegment ? 100 : publicIndex * Math.exp(priceReturn);
     if (priceIndex !== null) publicIndex = priceIndex;
-    else publicIndex = null;
 
     points.push({
       index_key: universe.key,
@@ -213,13 +230,14 @@ function computeUniversePoints(allRows, months, universe, pulledAt) {
       as_of_date: pulledAt,
       calculation_mode: "revised_backtest",
       provisional: false,
-      method_version: "market-pulse-soft-match-v0.4",
+      method_version: "market-pulse-soft-match-v0.5",
       sample_size: sampleSize,
       confidence,
       price_return_log: nullableRound(priceReturn, 6),
       rolling_momentum_pct: nullableRound(priceReturn === null ? null : Math.expm1(priceReturn) * 100, 3),
       raw_chained_index: nullableRound(nextRawIndex, 3),
       price_index: nullableRound(priceIndex, 3),
+      price_index_segment: priceIndex === null ? null : publicSegment,
       liquidity_index: nullableRound(liquidity.index, 3),
       transaction_count: liquidity.currentCount,
       baseline_transaction_count: nullableRound(liquidity.baselineCount, 3),
@@ -247,22 +265,27 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
   if (!currentRows.length || !prevRows.length || !weightRows.length) return null;
 
   const tierDefs = universe.tiers ?? RESALE_TIER_DEFS;
+  const fallbackKeyFns = fallbackCellKeyFns(universe);
   if (tierDefs.length === 0) {
-    return computeFallbackOnlyReturn(currentRows, prevRows, prevRows, universe.fallbackCellKey, { useFloorKernel: false });
+    return computeFallbackOnlyReturn(currentRows, prevRows, prevRows, fallbackKeyFns, { useFloorKernel: false });
   }
 
   const tierReturns = new Map();
   for (const tier of tierDefs) {
     tierReturns.set(tier.tier, buildKernelReturnMap(currentRows, prevRows, tier.keyFn, tier.minN));
   }
-  const fallbackReturns = buildKernelReturnMap(currentRows, prevRows, universe.fallbackCellKey, 8);
+  const fallbackReturns = fallbackKeyFns.map((keyFn, index) => ({
+    tier: index === 0 ? "fallback_cell_tenure" : "fallback_cell",
+    keyFn,
+    returns: buildKernelReturnMap(currentRows, prevRows, keyFn, 8)
+  }));
   const atoms = buildAtoms(weightRows);
   const totalAtomWeight = atoms.reduce((sum, atom) => sum + atom.weight, 0);
   if (totalAtomWeight <= 0) return null;
 
   const entries = [];
   for (const atom of atoms) {
-    const decision = chooseReturn(atom.rep, tierDefs, tierReturns, fallbackReturns, universe.fallbackCellKey);
+    const decision = chooseReturn(atom.rep, tierDefs, tierReturns, fallbackReturns);
     if (!decision) continue;
     entries.push({
       atom,
@@ -278,17 +301,19 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
   }
   if (!entries.length) return null;
 
-  const cappedEntries = capProjectWeights(entries);
+  const cappedEntries = universe.type === "district"
+    ? capFallbackWeights(capProjectWeights(entries), FALLBACK_WEIGHT_CAP)
+    : capProjectWeights(entries);
   const totalEffectiveWeight = cappedEntries.reduce((sum, entry) => sum + entry.capped_weight, 0);
   if (totalEffectiveWeight <= 0) return null;
 
   const weightedReturn = cappedEntries.reduce((sum, entry) => sum + entry.capped_weight * entry.return, 0) / totalEffectiveWeight;
   const activeAtomWeight = entries.reduce((sum, entry) => sum + entry.base_weight, 0);
   const matchedAtomWeight = entries
-    .filter((entry) => entry.tier !== "fallback_cell")
+    .filter((entry) => !isFallbackTier(entry.tier))
     .reduce((sum, entry) => sum + entry.base_weight, 0);
   const fallbackEffectiveWeight = cappedEntries
-    .filter((entry) => entry.tier === "fallback_cell")
+    .filter((entry) => isFallbackTier(entry.tier))
     .reduce((sum, entry) => sum + entry.capped_weight, 0);
   const projectWeights = groupSum(cappedEntries, (entry) => entry.project, (entry) => entry.capped_weight);
   const topProjectWeight = Math.max(0, ...projectWeights.values()) / totalEffectiveWeight;
@@ -314,24 +339,37 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
   };
 }
 
-function computeFallbackOnlyReturn(currentRows, prevRows, weightRows, cellKeyFn, options = {}) {
-  const fallbackReturns = options.useFloorKernel
-    ? buildKernelReturnMap(currentRows, prevRows, cellKeyFn, 8)
-    : buildMedianReturnMap(currentRows, prevRows, cellKeyFn, 8);
-  const weightByCell = groupSum(weightRows, cellKeyFn, (row) => row.price || 0);
-  const totalWeight = [...weightByCell.values()].reduce((sum, value) => sum + value, 0);
+function computeFallbackOnlyReturn(currentRows, prevRows, weightRows, cellKeyFns, options = {}) {
+  const keyFns = Array.isArray(cellKeyFns) ? cellKeyFns : [cellKeyFns];
+  const returnMaps = keyFns.map((keyFn, index) => ({
+    tier: index === 0 ? "fallback_cell_tenure" : "fallback_cell",
+    keyFn,
+    returns: options.useFloorKernel
+      ? buildKernelReturnMap(currentRows, prevRows, keyFn, 8)
+      : buildMedianReturnMap(currentRows, prevRows, keyFn, 8)
+  }));
+  const cells = buildCellAtoms(weightRows, keyFns[0]);
+  const totalWeight = cells.reduce((sum, cell) => sum + cell.weight, 0);
   if (totalWeight <= 0) return null;
 
   const entries = [];
-  for (const [cell, result] of fallbackReturns.entries()) {
-    const weight = weightByCell.get(cell) ?? 0;
-    if (weight <= 0 || !Number.isFinite(result.return)) continue;
+  for (const cell of cells) {
+    let decision = null;
+    for (const map of returnMaps) {
+      const result = map.returns.get(map.keyFn(cell.rep));
+      if (result && Number.isFinite(result.return)) {
+        decision = { tier: map.tier, result };
+        break;
+      }
+    }
+    if (!decision) continue;
     entries.push({
-      cell,
-      weight,
-      return: clamp(result.return, -RETURN_WINSOR_LOG, RETURN_WINSOR_LOG),
-      floor_similarity_avg: result.floor_similarity_avg,
-      floor_similarity_p25: result.floor_similarity_p25
+      cell: cell.key,
+      tier: decision.tier,
+      weight: cell.weight,
+      return: clamp(decision.result.return, -RETURN_WINSOR_LOG, RETURN_WINSOR_LOG),
+      floor_similarity_avg: decision.result.floor_similarity_avg,
+      floor_similarity_p25: decision.result.floor_similarity_p25
     });
   }
   const activeWeight = entries.reduce((sum, entry) => sum + entry.weight, 0);
@@ -346,12 +384,12 @@ function computeFallbackOnlyReturn(currentRows, prevRows, weightRows, cellKeyFn,
     fallback_share: 1,
     top_project_weight: 0,
     active_atom_count: entries.length,
-    total_atom_count: weightByCell.size,
+    total_atom_count: cells.length,
     project_count: 0,
     floor_similarity_avg: weightedAverage(entries, (entry) => entry.floor_similarity_avg, (entry) => entry.weight),
     floor_similarity_p25: weightedPercentile(entries, (entry) => entry.floor_similarity_p25, (entry) => entry.weight, 0.25),
     dispersion: median(returns.map((value) => Math.abs(value - medianReturn))),
-    tier_atom_counts: { fallback_cell: entries.length }
+    tier_atom_counts: objectFromMap(groupCounts(entries, (entry) => entry.tier))
   };
 }
 
@@ -375,13 +413,15 @@ function buildMedianReturnMap(currentRows, prevRows, keyFn, minN) {
   return returns;
 }
 
-function chooseReturn(row, tierDefs, tierReturns, fallbackReturns, fallbackCellKeyFn) {
+function chooseReturn(row, tierDefs, tierReturns, fallbackReturns) {
   for (const tier of tierDefs) {
     const result = tierReturns.get(tier.tier).get(tier.keyFn(row));
     if (result && Number.isFinite(result.return)) return { tier: tier.tier, result, multiplier: tier.multiplier };
   }
-  const fallback = fallbackReturns.get(fallbackCellKeyFn(row));
-  if (fallback && Number.isFinite(fallback.return)) return { tier: "fallback_cell", result: fallback, multiplier: 1 };
+  for (const fallback of fallbackReturns) {
+    const result = fallback.returns.get(fallback.keyFn(row));
+    if (result && Number.isFinite(result.return)) return { tier: fallback.tier, result, multiplier: 1 };
+  }
   return null;
 }
 
@@ -454,6 +494,20 @@ function buildAtoms(weightRows) {
   return [...atoms.values()].filter((atom) => atom.weight > 0);
 }
 
+function buildCellAtoms(weightRows, keyFn) {
+  const cells = new Map();
+  for (const row of weightRows) {
+    const key = keyFn(row);
+    const existing = cells.get(key);
+    if (existing) {
+      existing.weight += row.price || 0;
+    } else {
+      cells.set(key, { key, rep: row, weight: row.price || 0 });
+    }
+  }
+  return [...cells.values()].filter((cell) => cell.weight > 0);
+}
+
 function capProjectWeights(entries) {
   const byProject = groupSum(entries, (entry) => entry.project, (entry) => entry.effective_weight);
   const cappedProjectWeights = capWeights(byProject, PROJECT_WEIGHT_CAP);
@@ -465,10 +519,38 @@ function capProjectWeights(entries) {
   });
 }
 
-function confidenceFor(sampleSize, result) {
+function capFallbackWeights(entries, capShare) {
+  const fallbackWeight = entries
+    .filter((entry) => isFallbackTier(entry.tier))
+    .reduce((sum, entry) => sum + entry.capped_weight, 0);
+  const nonFallbackWeight = entries
+    .filter((entry) => !isFallbackTier(entry.tier))
+    .reduce((sum, entry) => sum + entry.capped_weight, 0);
+  const total = fallbackWeight + nonFallbackWeight;
+  if (total <= 0 || fallbackWeight <= 0 || nonFallbackWeight <= 0 || fallbackWeight / total <= capShare) return entries;
+
+  const fallbackScale = (capShare * nonFallbackWeight) / (fallbackWeight * (1 - capShare));
+  return entries.map((entry) => isFallbackTier(entry.tier)
+    ? { ...entry, capped_weight: entry.capped_weight * fallbackScale }
+    : entry);
+}
+
+function fallbackCellKeyFns(universe) {
+  if (Array.isArray(universe.fallbackCellKeys) && universe.fallbackCellKeys.length) return universe.fallbackCellKeys;
+  if (universe.fallbackCellKey) return [universe.fallbackCellKey];
+  return [(row) => `${row.district || "unknown"}|${row._size_key}`];
+}
+
+function isFallbackTier(tier) {
+  return String(tier || "").startsWith("fallback_cell");
+}
+
+function confidenceFor(sampleSize, result, universe = {}) {
   if (!result || sampleSize < 25 || result.coverage < 0.25) return "None";
   if (result.top_project_weight > PROJECT_WEIGHT_CAP + 0.0005) return "None";
-  if (sampleSize < 50 || result.coverage < 0.4 || result.matched_coverage < 0.25 || result.top_project_weight > 0.35) return "Low";
+  if (universe.sale_type === "resale" && universe.type === "district" && result.fallback_share > 0.7) return "None";
+  if (universe.sale_type === "resale" && result.fallback_share > 0.95) return "None";
+  if (sampleSize < 50 || result.coverage < 0.4 || result.matched_coverage < 0.25 || result.fallback_share > 0.55 || result.top_project_weight > 0.35) return "Low";
   if (sampleSize < 100 || result.coverage < 0.55 || result.matched_coverage < 0.45 || result.top_project_weight > 0.25) return "Medium";
   return "High";
 }
@@ -491,7 +573,7 @@ function buildSampleAudit(rows, months, points, pulledAt) {
   return {
     generated_at: pulledAt,
     calculation_mode: "revised_backtest",
-    method_version: "market-pulse-soft-match-v0.4",
+    method_version: "market-pulse-soft-match-v0.5",
     target_row_count: rows.length,
     first_month: months[0] ?? null,
     last_month: months.at(-1) ?? null,
@@ -523,12 +605,14 @@ function isTargetScope(row) {
 
 function enrichRow(row) {
   const sizeKey = sizeSegment(row).key;
+  const tenureKey = tenureBucket(row.tenure);
   const project = projectKey(row);
   const floorKey = normalizeFloorKey(row.floor_range);
   const floorMid = floorMidpoint(floorKey);
   return {
     ...row,
     _size_key: sizeKey,
+    _tenure_bucket: tenureKey,
     _project_key: project,
     _project_size_key: `${project}|${sizeKey}`,
     _floor_key: floorKey,
@@ -551,6 +635,13 @@ function normalizeFloorKey(value) {
 
 function canonicalText(value) {
   return String(value ?? "").trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+function tenureBucket(value) {
+  const text = canonicalText(value);
+  if (!text || text === "-") return "unknown";
+  if (text.includes("FREEHOLD") || /\b999\s*YRS\b/.test(text)) return "freehold_999";
+  return "leasehold";
 }
 
 function floorMidpoint(value) {

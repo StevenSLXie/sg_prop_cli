@@ -135,6 +135,7 @@ function prepareChart(chart, points) {
             month: point.period_end_month,
             rebased: base ? (100 * point.price_index) / base : null,
             confidence: point.confidence,
+            segment: point.price_index_segment ?? 0,
             sample_size: point.sample_size,
             matched_coverage: point.matched_coverage,
             fallback_share: point.fallback_share,
@@ -165,9 +166,12 @@ function renderSvg(chart, prepared) {
     grid.push(`<line x1="${pad.left}" y1="${y(value)}" x2="${width - pad.right}" y2="${y(value)}" stroke="#e5e7eb"/>`);
     grid.push(`<text x="${pad.left - 10}" y="${y(value) + 4}" text-anchor="end" font-size="12" fill="#4b5563">${value}</text>`);
   }
-  const lines = prepared.series.map((series) => {
-    const points = series.points.map((point) => `${x(point.month)},${y(point.rebased)}`).join(" ");
-    return `<polyline points="${points}" fill="none" stroke="${series.color}" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const lines = prepared.series.flatMap((series) => {
+    const segments = groupBy(series.points, (point) => point.segment);
+    return [...segments.values()].map((points) => {
+      const coordinates = points.map((point) => `${x(point.month)},${y(point.rebased)}`).join(" ");
+      return `<polyline points="${coordinates}" fill="none" stroke="${series.color}" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>`;
+    });
   }).join("\n");
   const labels = prepared.months
     .filter((month) => /-(01|04|07|10)$/.test(month))
@@ -192,7 +196,7 @@ function renderSvg(chart, prepared) {
   ${lines}
   ${labels}
   ${legend}
-  <text x="${pad.left}" y="${height - 18}" font-size="12" fill="#6b7280">Method: soft matched-basket v0.4, project x size hard match, floor-distance kernel, condominium/apartment only.</text>
+  <text x="${pad.left}" y="${height - 18}" font-size="12" fill="#6b7280">Method: soft matched-basket v0.5, project x size hard match, floor-distance kernel, condominium/apartment only.</text>
 </svg>
 `;
 }
@@ -205,4 +209,15 @@ function round(value, digits) {
   if (value === null || value === undefined || !Number.isFinite(value)) return null;
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+function groupBy(rows, keyFn) {
+  const map = new Map();
+  for (const row of rows) {
+    const key = keyFn(row);
+    const group = map.get(key);
+    if (group) group.push(row);
+    else map.set(key, [row]);
+  }
+  return map;
 }
