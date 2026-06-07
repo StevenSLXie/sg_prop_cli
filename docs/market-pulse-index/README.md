@@ -94,6 +94,8 @@ The same method is computed separately for `resale` and `new_sale`, so users can
 
 For `new_sale`, project-level repeat matching is disabled by default. New launches often sell through in concentrated windows, so repeated project observations are treated as launch-phase mix rather than repeat-market evidence. New sale indexes therefore use fallback cells with the same floor-distance kernel.
 
+The overall index also uses `district x size` fallback cells, not only `market segment x size`, to avoid treating cross-district launch mix as market-wide price movement.
+
 ## Scope
 
 Included:

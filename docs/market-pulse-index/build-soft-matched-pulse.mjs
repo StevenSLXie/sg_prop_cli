@@ -125,7 +125,7 @@ function buildUniverses(rows, options = {}) {
       sale_type: saleLabel,
       tiers,
       filter: (row) => row.type_of_sale === saleType,
-      fallbackCellKey: (row) => `${row.market_segment || "unknown"}|${row._size_key}`
+      fallbackCellKey: (row) => `${row.district || "unknown"}|${row._size_key}`
     });
 
     for (const segment of segments) {
