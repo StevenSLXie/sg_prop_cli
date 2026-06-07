@@ -10,7 +10,6 @@ const WINDOW_MONTHS = 3;
 const WEIGHT_LOOKBACK_MONTHS = 24;
 const MIN_WEIGHT_LOOKBACK_MONTHS = 6;
 const PROJECT_WEIGHT_CAP = 0.15;
-const FALLBACK_WEIGHT_CAP = 0.45;
 const RETURN_WINSOR_LOG = 0.12;
 const FLOOR_KERNEL_SCALE = 10;
 
@@ -21,7 +20,7 @@ const SIZE_SEGMENTS = [
 ];
 
 const RESALE_TIER_DEFS = [
-  { tier: "project_size_floor_kernel", multiplier: 2, minN: 3, keyFn: (row) => row._project_size_key }
+  { tier: "project_size_floor_kernel", multiplier: 1, minN: 3, keyFn: (row) => row._project_size_key }
 ];
 
 const args = parseArgs(process.argv.slice(2));
@@ -69,13 +68,12 @@ async function main() {
       weight_lookback_months: WEIGHT_LOOKBACK_MONTHS,
       min_weight_lookback_months: MIN_WEIGHT_LOOKBACK_MONTHS,
       project_weight_cap: PROJECT_WEIGHT_CAP,
-      fallback_weight_cap: FALLBACK_WEIGHT_CAP,
       return_winsor_log: RETURN_WINSOR_LOG,
       floor_kernel_scale: FLOOR_KERNEL_SCALE,
       size_segments: SIZE_SEGMENTS.map(({ key, label, minSqft, maxSqft }) => ({ key, label, minSqft, maxSqft })),
       tenure_buckets: ["freehold_999", "leasehold", "unknown"],
       resale_tiers: [
-        { tier: "project_size_floor_kernel", weight_multiplier: 2, min_current_and_previous_rows: 3, project_key: "district_project_street" },
+        { tier: "project_size_floor_kernel", weight_multiplier: 1, min_current_and_previous_rows: 3, project_key: "district_project_street" },
         { tier: "fallback_cell_floor_kernel", weight_multiplier: 1, min_current_and_previous_rows: 8, primary_cell: "universe_cell_tenure", secondary_cell: "universe_cell" }
       ],
       new_sale_tiers: [
@@ -277,7 +275,7 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
   const fallbackReturns = fallbackKeyFns.map((keyFn, index) => ({
     tier: index === 0 ? "fallback_cell_tenure" : "fallback_cell",
     keyFn,
-    returns: buildKernelReturnMap(currentRows, prevRows, keyFn, 8)
+    returns: buildMedianReturnMap(currentRows, prevRows, keyFn, 8)
   }));
   const atoms = buildAtoms(weightRows);
   const totalAtomWeight = atoms.reduce((sum, atom) => sum + atom.weight, 0);
@@ -296,44 +294,75 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
       floor_similarity_p25: decision.result.floor_similarity_p25,
       base_weight: atom.weight,
       effective_weight: atom.weight * decision.multiplier,
-      project: atom.rep._project_key
+      project: atom.rep._project_key,
+      cell: fallbackKeyFns[0](atom.rep)
     });
   }
   if (!entries.length) return null;
 
-  const cappedEntries = universe.type === "district"
-    ? capFallbackWeights(capProjectWeights(entries), FALLBACK_WEIGHT_CAP)
-    : capProjectWeights(entries);
-  const totalEffectiveWeight = cappedEntries.reduce((sum, entry) => sum + entry.capped_weight, 0);
-  if (totalEffectiveWeight <= 0) return null;
+  const cappedEntries = capProjectWeights(entries);
+  return aggregateNormalizedCellReturns(cappedEntries, weightRows, fallbackKeyFns[0], atoms.length);
+}
 
-  const weightedReturn = cappedEntries.reduce((sum, entry) => sum + entry.capped_weight * entry.return, 0) / totalEffectiveWeight;
-  const activeAtomWeight = entries.reduce((sum, entry) => sum + entry.base_weight, 0);
-  const matchedAtomWeight = entries
-    .filter((entry) => !isFallbackTier(entry.tier))
-    .reduce((sum, entry) => sum + entry.base_weight, 0);
-  const fallbackEffectiveWeight = cappedEntries
-    .filter((entry) => isFallbackTier(entry.tier))
-    .reduce((sum, entry) => sum + entry.capped_weight, 0);
-  const projectWeights = groupSum(cappedEntries, (entry) => entry.project, (entry) => entry.capped_weight);
-  const topProjectWeight = Math.max(0, ...projectWeights.values()) / totalEffectiveWeight;
+function aggregateNormalizedCellReturns(entries, weightRows, cellKeyFn, totalAtomCount) {
+  const cellWeights = groupSum(weightRows, cellKeyFn, (row) => row.price || 0);
+  const totalCellWeight = [...cellWeights.values()].reduce((sum, value) => sum + value, 0);
+  if (totalCellWeight <= 0) return null;
+
+  const entriesByCell = groupRows(entries, (entry) => entry.cell);
+  const cells = [];
+  const impliedProjectWeights = new Map();
+
+  for (const [cell, cellEntries] of entriesByCell.entries()) {
+    const targetWeight = cellWeights.get(cell) ?? 0;
+    const sourceWeight = cellEntries.reduce((sum, entry) => sum + entry.capped_weight, 0);
+    if (targetWeight <= 0 || sourceWeight <= 0) continue;
+
+    const cellReturn = cellEntries.reduce((sum, entry) => sum + entry.capped_weight * entry.return, 0) / sourceWeight;
+    const fallbackSourceWeight = cellEntries
+      .filter((entry) => isFallbackTier(entry.tier))
+      .reduce((sum, entry) => sum + entry.capped_weight, 0);
+    const matchedSourceWeight = sourceWeight - fallbackSourceWeight;
+
+    for (const entry of cellEntries) {
+      const impliedWeight = targetWeight * entry.capped_weight / sourceWeight;
+      impliedProjectWeights.set(entry.project, (impliedProjectWeights.get(entry.project) ?? 0) + impliedWeight);
+    }
+
+    cells.push({
+      cell,
+      target_weight: targetWeight,
+      source_weight: sourceWeight,
+      return: cellReturn,
+      fallback_share: fallbackSourceWeight / sourceWeight,
+      matched_share: matchedSourceWeight / sourceWeight,
+      floor_similarity_avg: weightedAverage(cellEntries, (entry) => entry.floor_similarity_avg, (entry) => entry.capped_weight),
+      floor_similarity_p25: weightedPercentile(cellEntries, (entry) => entry.floor_similarity_p25, (entry) => entry.capped_weight, 0.25)
+    });
+  }
+
+  const activeCellWeight = cells.reduce((sum, cell) => sum + cell.target_weight, 0);
+  if (activeCellWeight <= 0) return null;
+
+  const weightedReturn = cells.reduce((sum, cell) => sum + cell.target_weight * cell.return, 0) / activeCellWeight;
+  const fallbackShare = cells.reduce((sum, cell) => sum + cell.target_weight * cell.fallback_share, 0) / activeCellWeight;
+  const matchedCoverage = cells.reduce((sum, cell) => sum + cell.target_weight * cell.matched_share, 0) / totalCellWeight;
+  const topProjectWeight = Math.max(0, ...impliedProjectWeights.values()) / activeCellWeight;
   const tierAtomCounts = groupCounts(entries, (entry) => entry.tier);
-  const returns = cappedEntries.map((entry) => entry.return);
+  const returns = cells.map((cell) => cell.return);
   const medianReturn = median(returns);
-  const floorSimilarityAvg = weightedAverage(cappedEntries, (entry) => entry.floor_similarity_avg, (entry) => entry.capped_weight);
-  const floorSimilarityP25 = weightedPercentile(cappedEntries, (entry) => entry.floor_similarity_p25, (entry) => entry.capped_weight, 0.25);
 
   return {
     return: weightedReturn,
-    coverage: activeAtomWeight / totalAtomWeight,
-    matched_coverage: matchedAtomWeight / totalAtomWeight,
-    fallback_share: fallbackEffectiveWeight / totalEffectiveWeight,
+    coverage: activeCellWeight / totalCellWeight,
+    matched_coverage: matchedCoverage,
+    fallback_share: fallbackShare,
     top_project_weight: topProjectWeight,
     active_atom_count: entries.length,
-    total_atom_count: atoms.length,
-    project_count: projectWeights.size,
-    floor_similarity_avg: floorSimilarityAvg,
-    floor_similarity_p25: floorSimilarityP25,
+    total_atom_count: totalAtomCount,
+    project_count: impliedProjectWeights.size,
+    floor_similarity_avg: weightedAverage(cells, (cell) => cell.floor_similarity_avg, (cell) => cell.target_weight),
+    floor_similarity_p25: weightedPercentile(cells, (cell) => cell.floor_similarity_p25, (cell) => cell.target_weight, 0.25),
     dispersion: median(returns.map((value) => Math.abs(value - medianReturn))),
     tier_atom_counts: objectFromMap(tierAtomCounts)
   };
@@ -519,22 +548,6 @@ function capProjectWeights(entries) {
   });
 }
 
-function capFallbackWeights(entries, capShare) {
-  const fallbackWeight = entries
-    .filter((entry) => isFallbackTier(entry.tier))
-    .reduce((sum, entry) => sum + entry.capped_weight, 0);
-  const nonFallbackWeight = entries
-    .filter((entry) => !isFallbackTier(entry.tier))
-    .reduce((sum, entry) => sum + entry.capped_weight, 0);
-  const total = fallbackWeight + nonFallbackWeight;
-  if (total <= 0 || fallbackWeight <= 0 || nonFallbackWeight <= 0 || fallbackWeight / total <= capShare) return entries;
-
-  const fallbackScale = (capShare * nonFallbackWeight) / (fallbackWeight * (1 - capShare));
-  return entries.map((entry) => isFallbackTier(entry.tier)
-    ? { ...entry, capped_weight: entry.capped_weight * fallbackScale }
-    : entry);
-}
-
 function fallbackCellKeyFns(universe) {
   if (Array.isArray(universe.fallbackCellKeys) && universe.fallbackCellKeys.length) return universe.fallbackCellKeys;
   if (universe.fallbackCellKey) return [universe.fallbackCellKey];
@@ -548,8 +561,6 @@ function isFallbackTier(tier) {
 function confidenceFor(sampleSize, result, universe = {}) {
   if (!result || sampleSize < 25 || result.coverage < 0.25) return "None";
   if (result.top_project_weight > PROJECT_WEIGHT_CAP + 0.0005) return "None";
-  if (universe.sale_type === "resale" && universe.type === "district" && result.fallback_share > 0.7) return "None";
-  if (universe.sale_type === "resale" && result.fallback_share > 0.95) return "None";
   if (sampleSize < 50 || result.coverage < 0.4 || result.matched_coverage < 0.25 || result.fallback_share > 0.55 || result.top_project_weight > 0.35) return "Low";
   if (sampleSize < 100 || result.coverage < 0.55 || result.matched_coverage < 0.45 || result.top_project_weight > 0.25) return "Medium";
   return "High";
