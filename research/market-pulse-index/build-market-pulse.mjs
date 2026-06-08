@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 const SQM_TO_SQFT = 10.7639104167;
 const DEFAULT_BROKER_URL = "https://sg-housing-data-mcp-spec.vercel.app/api/ura";
-const DEFAULT_OUT_DIR = "docs/market-pulse-index/output";
+const DEFAULT_OUT_DIR = "research/market-pulse-index/output";
 const CELL_MIN_N = 8;
 const WEIGHT_LOOKBACK_MONTHS = 24;
 const WINDOW_MONTHS = 3;
@@ -581,7 +581,7 @@ function printHelp() {
   console.log(`Singapore Condo Market Pulse prototype
 
 Usage:
-  node docs/market-pulse-index/build-market-pulse.mjs [options]
+  node research/market-pulse-index/build-market-pulse.mjs [options]
 
 Options:
   --broker-url <url>   URA proxy URL. Defaults to ${DEFAULT_BROKER_URL}

@@ -3,9 +3,9 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
-const OUT_DIR = "docs/market-pulse-index/output";
+const OUT_DIR = "research/market-pulse-index/output";
 const URA_COMPARISON_PATH = join(OUT_DIR, "ura-comparison.json");
-const SRX_MONTHLY_PATH = "docs/market-pulse-index/srx-monthly-public.csv";
+const SRX_MONTHLY_PATH = "research/market-pulse-index/srx-monthly-public.csv";
 
 const SERIES = [
   { key: "overall", color: "#111827" },

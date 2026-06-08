@@ -10,6 +10,7 @@
   "files": [
     "dist",
     "docs",
+    "research",
     "evals",
     "examples/*.png",
     "scripts",
@@ -32,6 +33,7 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.14"

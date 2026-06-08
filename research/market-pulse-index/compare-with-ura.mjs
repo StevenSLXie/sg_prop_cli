@@ -3,8 +3,8 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
-const OUT_DIR = "docs/market-pulse-index/output";
-const OUR_INDEX_PATH = join(OUT_DIR, "soft-matched-index-points.json");
+const OUT_DIR = "research/market-pulse-index/output";
+const OUR_INDEX_PATH = join(OUT_DIR, "index-points.json");
 const URA_TYPE_RESOURCE = "d_da00b36ca8c831322fa0bb2a3378a476";
 const URA_LOCALITY_RESOURCE = "d_5754436c9a35951630ad5d09bbdba112";
 
@@ -23,26 +23,24 @@ main().catch((error) => {
 async function main() {
   await mkdir(OUT_DIR, { recursive: true });
   const our = JSON.parse(await readFile(OUR_INDEX_PATH, "utf8"));
-  const officialRows = {
-    type: await fetchDataGovRows(URA_TYPE_RESOURCE),
-    locality: await fetchDataGovRows(URA_LOCALITY_RESOURCE)
-  };
+  const officialType = await fetchDataGovRows(URA_TYPE_RESOURCE);
+  const officialLocality = await fetchDataGovRows(URA_LOCALITY_RESOURCE);
+  const officialRows = { type: officialType, locality: officialLocality };
   const comparison = buildComparison(our.points, officialRows);
-  await writeFile(join(OUT_DIR, "soft-matched-ura-comparison.csv"), toCsv(comparison.rows), "utf8");
-  await writeFile(join(OUT_DIR, "soft-matched-ura-comparison.json"), JSON.stringify(comparison, null, 2) + "\n", "utf8");
-  await writeFile(join(OUT_DIR, "soft-matched-ura-comparison.svg"), renderSvg(comparison), "utf8");
+  await writeFile(join(OUT_DIR, "ura-comparison.csv"), toCsv(comparison.rows), "utf8");
+  await writeFile(join(OUT_DIR, "ura-comparison.json"), JSON.stringify(comparison, null, 2) + "\n", "utf8");
+  await writeFile(join(OUT_DIR, "ura-comparison.svg"), renderSvg(comparison), "utf8");
   console.log(JSON.stringify({
     ok: true,
     rows: comparison.rows.length,
     period_start: comparison.rows[0]?.quarter,
     period_end: comparison.rows.at(-1)?.quarter,
     outputs: [
-      join(OUT_DIR, "soft-matched-ura-comparison.csv"),
-      join(OUT_DIR, "soft-matched-ura-comparison.json"),
-      join(OUT_DIR, "soft-matched-ura-comparison.svg")
+      join(OUT_DIR, "ura-comparison.csv"),
+      join(OUT_DIR, "ura-comparison.json"),
+      join(OUT_DIR, "ura-comparison.svg")
     ],
-    correlations: comparison.correlations,
-    direction_hit_rate: comparison.direction_hit_rate
+    correlations: comparison.correlations
   }, null, 2));
 }
 
@@ -58,28 +56,22 @@ async function fetchDataGovRows(resourceId) {
 }
 
 function buildComparison(points, officialRows) {
-  const quarters = quarterEndPoints(points, officialRows);
-  const rows = quarters.map((quarter) => {
+  const quarters = quarterEndPoints(points);
+  const rows = [];
+  for (const quarter of quarters) {
     const row = { quarter };
     for (const series of SERIES) {
-      const ourPoint = points.find((point) => (
-        point.index_key === series.our &&
-        point.period_end_month === quarterToEndMonth(quarter) &&
-        point.price_index !== null &&
-        point.confidence !== "None"
-      ));
+      const ourPoint = points.find((point) => point.index_key === series.our && point.period_end_month === quarterToEndMonth(quarter));
+      const official = officialValue(officialRows[series.officialSource], series.official, quarter);
       row[`${series.key}_our_raw`] = ourPoint?.price_index ?? null;
-      row[`${series.key}_official_raw`] = officialValue(officialRows[series.officialSource], series.official, quarter);
-      row[`${series.key}_our_confidence`] = ourPoint?.confidence ?? "";
-      row[`${series.key}_matched_coverage`] = ourPoint?.matched_coverage ?? null;
-      row[`${series.key}_fallback_share`] = ourPoint?.fallback_share ?? null;
-      row[`${series.key}_top_project_weight`] = ourPoint?.top_project_weight ?? null;
+      row[`${series.key}_official_raw`] = official;
+      row[`${series.key}_our_rebased`] = null;
+      row[`${series.key}_official_rebased`] = null;
+      row[`${series.key}_our_qoq_pct`] = null;
+      row[`${series.key}_official_qoq_pct`] = null;
     }
-    return row;
-  }).filter((row) => SERIES.every((series) => (
-    Number.isFinite(row[`${series.key}_our_raw`]) &&
-    Number.isFinite(row[`${series.key}_official_raw`])
-  )));
+    rows.push(row);
+  }
 
   const baseQuarter = rows[0]?.quarter;
   for (const series of SERIES) {
@@ -93,9 +85,6 @@ function buildComparison(points, officialRows) {
         const prev = rows[i - 1];
         row[`${series.key}_our_qoq_pct`] = pctChange(row[`${series.key}_our_raw`], prev[`${series.key}_our_raw`]);
         row[`${series.key}_official_qoq_pct`] = pctChange(row[`${series.key}_official_raw`], prev[`${series.key}_official_raw`]);
-      } else {
-        row[`${series.key}_our_qoq_pct`] = null;
-        row[`${series.key}_official_qoq_pct`] = null;
       }
     }
   }
@@ -105,43 +94,23 @@ function buildComparison(points, officialRows) {
     const officialReturns = rows.slice(1).map((row) => row[`${series.key}_official_qoq_pct`]);
     return [series.key, round(correlation(ourReturns, officialReturns), 3)];
   }));
-  const directionHitRate = Object.fromEntries(SERIES.map((series) => {
-    const pairs = rows.slice(1)
-      .map((row) => [row[`${series.key}_our_qoq_pct`], row[`${series.key}_official_qoq_pct`]])
-      .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b));
-    const hits = pairs.filter(([a, b]) => Math.sign(a) === Math.sign(b)).length;
-    return [series.key, pairs.length ? round(hits / pairs.length, 3) : null];
-  }));
 
   return {
     generated_at: new Date().toISOString(),
     base_quarter: baseQuarter,
-    comparison_mode: "soft_matched_quarter_end_3m_rolling_vs_official_quarterly",
-    caveat: "Soft matched-basket index uses resale Condominium/Apartment transactions only. URA official indexes cover non-landed private residential properties by locality and use URA's official stratified hedonic methodology; scope is not identical.",
+    comparison_mode: "quarter_end_3m_rolling_vs_official_quarterly",
+    caveat: "Our index is resale Condominium/Apartment only. URA official indexes cover non-landed private residential properties by locality and use URA's stratified hedonic methodology; scope is not identical.",
     rows,
-    correlations,
-    direction_hit_rate: directionHitRate
+    correlations
   };
 }
 
-function quarterEndPoints(points, officialRows) {
-  const officialQuarters = new Set();
-  for (const sourceRows of Object.values(officialRows)) {
-    for (const row of sourceRows) {
-      for (const key of Object.keys(row)) {
-        if (/^\d{4}[1-4]Q$/.test(key) && row[key] !== null && row[key] !== "") {
-          officialQuarters.add(`${key.slice(0, 4)}Q${key[4]}`);
-        }
-      }
-    }
-  }
-  const months = new Set(points
-    .filter((point) => point.index_key === "SG_CONDO_RESALE_OVERALL" && point.price_index !== null && point.confidence !== "None")
-    .map((point) => point.period_end_month));
+function quarterEndPoints(points) {
+  const months = new Set(points.filter((point) => point.index_key === "SG_CONDO_RESALE_OVERALL").map((point) => point.period_end_month));
   return [...months]
     .filter((month) => /-(03|06|09|12)$/.test(month))
     .map(monthToQuarter)
-    .filter((quarter) => officialQuarters.has(quarter))
+    .filter((quarter) => quarter >= "2023Q3" && quarter <= "2026Q1")
     .sort();
 }
 
@@ -188,17 +157,20 @@ function renderSvg(comparison) {
   const width = 1180;
   const height = 760;
   const pad = { left: 70, right: 30, top: 70, bottom: 80 };
-  const rows = comparison.rows;
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
-  const values = rows.flatMap((row) => SERIES.flatMap((series) => [
-    row[`${series.key}_our_rebased`],
-    row[`${series.key}_official_rebased`]
-  ])).filter(Number.isFinite);
-  const minY = Math.floor(Math.min(...values) / 2) * 2;
-  const maxY = Math.ceil(Math.max(...values) / 2) * 2;
-  const x = (i) => pad.left + (plotWidth * i) / Math.max(1, rows.length - 1);
+  const rows = comparison.rows;
+  const values = [];
+  for (const row of rows) {
+    for (const series of SERIES) {
+      values.push(row[`${series.key}_our_rebased`], row[`${series.key}_official_rebased`]);
+    }
+  }
+  const minY = Math.floor(Math.min(...values.filter(Number.isFinite)) / 2) * 2;
+  const maxY = Math.ceil(Math.max(...values.filter(Number.isFinite)) / 2) * 2;
+  const x = (i) => pad.left + (plotWidth * i) / (rows.length - 1);
   const y = (v) => pad.top + plotHeight - ((v - minY) / (maxY - minY)) * plotHeight;
+  const quarterLabel = (q) => q.replace("Q", " Q");
   const line = (series, official) => {
     const attr = official ? "official_rebased" : "our_rebased";
     const points = rows.map((row, i) => `${x(i)},${y(row[`${series.key}_${attr}`])}`).join(" ");
@@ -210,15 +182,15 @@ function renderSvg(comparison) {
     grid.push(`<line x1="${pad.left}" y1="${y(value)}" x2="${width - pad.right}" y2="${y(value)}" stroke="#e5e7eb"/>`);
     grid.push(`<text x="${pad.left - 10}" y="${y(value) + 4}" text-anchor="end" font-size="12" fill="#4b5563">${value}</text>`);
   }
-  const xLabels = rows.map((row, i) => `<text x="${x(i)}" y="${height - 45}" text-anchor="middle" font-size="11" fill="#4b5563">${row.quarter.replace("Q", " Q")}</text>`).join("\n");
+  const xLabels = rows.map((row, i) => `<text x="${x(i)}" y="${height - 45}" text-anchor="middle" font-size="12" fill="#4b5563">${quarterLabel(row.quarter)}</text>`).join("\n");
   const legend = SERIES.map((series, i) => {
     const y0 = 96 + i * 24;
-    return `<g><line x1="865" y1="${y0}" x2="900" y2="${y0}" stroke="${series.color}" stroke-width="3"/><text x="908" y="${y0 + 4}" font-size="13">${series.key} soft</text><line x1="1000" y1="${y0}" x2="1035" y2="${y0}" stroke="${series.color}" stroke-width="2" stroke-dasharray="7 5"/><text x="1043" y="${y0 + 4}" font-size="13">URA</text></g>`;
+    return `<g><line x1="865" y1="${y0}" x2="900" y2="${y0}" stroke="${series.color}" stroke-width="3"/><text x="908" y="${y0 + 4}" font-size="13">${series.key} ours</text><line x1="1000" y1="${y0}" x2="1035" y2="${y0}" stroke="${series.color}" stroke-width="2" stroke-dasharray="7 5"/><text x="1043" y="${y0 + 4}" font-size="13">URA</text></g>`;
   }).join("\n");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
   <rect width="100%" height="100%" fill="#ffffff"/>
-  <text x="${pad.left}" y="34" font-size="22" font-weight="700" fill="#111827">Soft Matched Condo Market Pulse vs URA</text>
-  <text x="${pad.left}" y="56" font-size="13" fill="#4b5563">Quarter-end 3M rolling points, rebased to ${comparison.base_quarter}=100. Solid = soft matched-basket; dashed = official URA/SingStat index.</text>
+  <text x="${pad.left}" y="34" font-size="22" font-weight="700" fill="#111827">Singapore Condo Market Pulse vs URA Non-Landed Locality Index</text>
+  <text x="${pad.left}" y="56" font-size="13" fill="#4b5563">Quarter-end 3M rolling points, rebased to ${comparison.base_quarter}=100. Solid = our resale condo/apartment index; dashed = official URA/SingStat index.</text>
   ${grid.join("\n")}
   <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" stroke="#9ca3af"/>
   <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" stroke="#9ca3af"/>
@@ -226,7 +198,7 @@ function renderSvg(comparison) {
   ${SERIES.map((series) => line(series, true)).join("\n")}
   ${xLabels}
   ${legend}
-  <text x="${pad.left}" y="${height - 18}" font-size="12" fill="#6b7280">Caveat: scopes differ. Soft index excludes new sale, sub-sale, EC and landed.</text>
+  <text x="${pad.left}" y="${height - 18}" font-size="12" fill="#6b7280">Caveat: scopes differ. Our index excludes new sale, sub-sale, EC and uses resale Condominium/Apartment transactions only.</text>
 </svg>
 `;
 }
@@ -234,7 +206,11 @@ function renderSvg(comparison) {
 function toCsv(rows) {
   if (!rows.length) return "";
   const columns = Object.keys(rows[0]);
-  return `${[columns.join(","), ...rows.map((row) => columns.map((column) => csvValue(row[column])).join(","))].join("\n")}\n`;
+  const lines = [columns.join(",")];
+  for (const row of rows) {
+    lines.push(columns.map((column) => csvValue(row[column])).join(","));
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function csvValue(value) {

@@ -608,13 +608,13 @@ No public index should be shipped until the no-lookahead backtest and data avail
 The first standalone prototype lives in this folder:
 
 ```bash
-node docs/market-pulse-index/build-market-pulse.mjs
+node research/market-pulse-index/build-market-pulse.mjs
 ```
 
 It writes JSON/CSV outputs under:
 
 ```text
-docs/market-pulse-index/output/
+research/market-pulse-index/output/
 ```
 
 The prototype:

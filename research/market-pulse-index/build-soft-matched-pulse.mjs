@@ -3,7 +3,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
-const DEFAULT_OUT_DIR = "docs/market-pulse-index/output";
+const DEFAULT_OUT_DIR = "research/market-pulse-index/output";
 const DEFAULT_SNAPSHOT = join(DEFAULT_OUT_DIR, "normalized-snapshot.json");
 const SQM_TO_SQFT = 10.7639104167;
 const WINDOW_MONTHS = 3;
@@ -63,12 +63,12 @@ async function main() {
   const indexJson = {
     generated_at: pulledAt,
     calculation_mode: "revised_backtest",
-    method_version: "market-pulse-soft-match-v0.5",
+    method_version: "market-pulse-soft-match-v0.6",
     source_snapshot: snapshotPath,
     scope: {
       type_of_sale: ["resale", "new_sale"],
       property_type: ["Condominium", "Apartment"],
-      excluded: ["sub_sale", "Executive Condominium", "landed", "resale_multi_unit_bulk_transactions"]
+      excluded: ["sub_sale", "Executive Condominium", "landed", "multi_unit_bulk_transactions"]
     },
     parameters: {
       window_months: WINDOW_MONTHS,
@@ -214,7 +214,7 @@ function computeUniversePoints(allRows, months, universe, pulledAt) {
   const points = [];
   let rawIndex = null;
   let publicIndex = null;
-  let publicSegment = 0;
+  let lastPublishedIndex = null;
 
   for (let i = WINDOW_MONTHS; i < months.length; i++) {
     const endMonth = months[i];
@@ -235,10 +235,39 @@ function computeUniversePoints(allRows, months, universe, pulledAt) {
     const priceReturn = result?.return ?? null;
     const nextRawIndex = priceReturn === null ? null : rawIndex === null ? 100 : rawIndex * Math.exp(priceReturn);
     if (nextRawIndex !== null) rawIndex = nextRawIndex;
-    const startsNewSegment = priceReturn !== null && confidence !== "None" && publicIndex === null;
-    if (startsNewSegment) publicSegment += 1;
-    const priceIndex = priceReturn === null || confidence === "None" ? null : startsNewSegment ? 100 : publicIndex * Math.exp(priceReturn);
-    if (priceIndex !== null) publicIndex = priceIndex;
+
+    // Published index. Suppressed (confidence None) points are not published, but instead of
+    // splicing a single-step return onto a stale level when the series resumes, bridge straight
+    // from the last published window to the current window. This keeps the level continuous
+    // without resetting to 100 on every sample-shortage flicker. The winsor band is scaled by
+    // the number of bridged steps so a legitimate multi-month move is not over-clamped.
+    let priceIndex = null;
+    let publishedReturn = null;
+    let bridgedFromMonth = "";
+    if (priceReturn !== null && confidence !== "None") {
+      if (publicIndex === null) {
+        priceIndex = 100;
+      } else if (lastPublishedIndex === i - 1) {
+        publishedReturn = priceReturn;
+        priceIndex = publicIndex * Math.exp(priceReturn);
+      } else {
+        const gapSteps = i - lastPublishedIndex;
+        bridgedFromMonth = months[lastPublishedIndex];
+        const bridgeWindow = monthWindow(bridgedFromMonth, WINDOW_MONTHS);
+        const bridge = computeSoftMatchedReturn(
+          rowsByMonth,
+          universe,
+          windowMonths,
+          bridgeWindow,
+          weightMonths,
+          RETURN_WINSOR_LOG * gapSteps
+        );
+        publishedReturn = bridge?.return ?? priceReturn;
+        priceIndex = publicIndex * Math.exp(publishedReturn);
+      }
+      publicIndex = priceIndex;
+      lastPublishedIndex = i;
+    }
 
     points.push({
       index_key: universe.key,
@@ -254,14 +283,15 @@ function computeUniversePoints(allRows, months, universe, pulledAt) {
       as_of_date: pulledAt,
       calculation_mode: "revised_backtest",
       provisional: false,
-      method_version: "market-pulse-soft-match-v0.5",
+      method_version: "market-pulse-soft-match-v0.6",
       sample_size: sampleSize,
       confidence,
       price_return_log: nullableRound(priceReturn, 6),
       rolling_momentum_pct: nullableRound(priceReturn === null ? null : Math.expm1(priceReturn) * 100, 3),
       raw_chained_index: nullableRound(nextRawIndex, 3),
       price_index: nullableRound(priceIndex, 3),
-      price_index_segment: priceIndex === null ? null : publicSegment,
+      published_return_log: nullableRound(publishedReturn, 6),
+      bridged_from_month: bridgedFromMonth,
       liquidity_index: nullableRound(liquidity.index, 3),
       transaction_count: liquidity.currentCount,
       baseline_transaction_count: nullableRound(liquidity.baselineCount, 3),
@@ -282,7 +312,7 @@ function computeUniversePoints(allRows, months, universe, pulledAt) {
   return points;
 }
 
-function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindowMonths, weightMonths) {
+function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindowMonths, weightMonths, winsorLog = RETURN_WINSOR_LOG) {
   const currentRows = rowsForMonths(rowsByMonth, windowMonths);
   const prevRows = rowsForMonths(rowsByMonth, prevWindowMonths);
   const weightRows = rowsForMonths(rowsByMonth, weightMonths);
@@ -291,7 +321,7 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
   const tierDefs = universe.tiers ?? RESALE_TIER_DEFS;
   const fallbackKeyFns = fallbackCellKeyFns(universe);
   if (tierDefs.length === 0) {
-    return computeFallbackOnlyReturn(currentRows, prevRows, prevRows, fallbackKeyFns, { useFloorKernel: false });
+    return computeFallbackOnlyReturn(currentRows, prevRows, prevRows, fallbackKeyFns, { useFloorKernel: false, winsorLog });
   }
 
   const tierReturns = new Map();
@@ -315,7 +345,7 @@ function computeSoftMatchedReturn(rowsByMonth, universe, windowMonths, prevWindo
       atom,
       tier: decision.tier,
       raw_return: decision.result.return,
-      return: clamp(decision.result.return, -RETURN_WINSOR_LOG, RETURN_WINSOR_LOG),
+      return: clamp(decision.result.return, -winsorLog, winsorLog),
       floor_similarity_avg: decision.result.floor_similarity_avg,
       floor_similarity_p25: decision.result.floor_similarity_p25,
       base_weight: atom.weight,
@@ -395,6 +425,7 @@ function aggregateNormalizedCellReturns(entries, weightRows, cellKeyFn, totalAto
 }
 
 function computeFallbackOnlyReturn(currentRows, prevRows, weightRows, cellKeyFns, options = {}) {
+  const winsorLog = options.winsorLog ?? RETURN_WINSOR_LOG;
   const keyFns = Array.isArray(cellKeyFns) ? cellKeyFns : [cellKeyFns];
   const returnMaps = keyFns.map((keyFn, index) => ({
     tier: index === 0 ? "fallback_cell_tenure" : "fallback_cell",
@@ -422,7 +453,7 @@ function computeFallbackOnlyReturn(currentRows, prevRows, weightRows, cellKeyFns
       cell: cell.key,
       tier: decision.tier,
       weight: cell.weight,
-      return: clamp(decision.result.return, -RETURN_WINSOR_LOG, RETURN_WINSOR_LOG),
+      return: clamp(decision.result.return, -winsorLog, winsorLog),
       floor_similarity_avg: decision.result.floor_similarity_avg,
       floor_similarity_p25: decision.result.floor_similarity_p25
     });
@@ -631,7 +662,7 @@ function latestByKey(points) {
 function isTargetScope(row) {
   return (
     (row.type_of_sale === "resale" || row.type_of_sale === "new_sale") &&
-    (row.type_of_sale !== "resale" || row.no_of_units === 1) &&
+    row.no_of_units === 1 &&
     (row.property_type === "Condominium" || row.property_type === "Apartment") &&
     isValidMonth(row.contract_month) &&
     row.area_sqm > 0 &&
@@ -681,7 +712,7 @@ function canonicalText(value) {
 function tenureBucket(value) {
   const text = canonicalText(value);
   if (!text || text === "-") return "unknown";
-  if (text.includes("FREEHOLD") || /\b999\s*YRS\b/.test(text)) return "freehold_999";
+  if (text.includes("FREEHOLD") || /\b999\b/.test(text)) return "freehold_999";
   return "leasehold";
 }
 
@@ -917,8 +948,8 @@ function printHelp() {
   console.log(`Singapore Condo Market Pulse soft matched-basket prototype
 
 Usage:
-  node docs/market-pulse-index/build-market-pulse.mjs --save-snapshot
-  node docs/market-pulse-index/build-soft-matched-pulse.mjs [options]
+  node research/market-pulse-index/build-market-pulse.mjs --save-snapshot
+  node research/market-pulse-index/build-soft-matched-pulse.mjs [options]
 
 Options:
   --snapshot <path>  Normalized transaction snapshot. Defaults to ${DEFAULT_SNAPSHOT}

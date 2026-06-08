@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 const SQM_TO_SQFT = 10.7639104167;
 const DEFAULT_BROKER_URL = "https://sg-housing-data-mcp-spec.vercel.app/api/ura";
-const DEFAULT_OUT_DIR = "docs/market-pulse-index/output";
+const DEFAULT_OUT_DIR = "research/market-pulse-index/output";
 
 const args = parseArgs(process.argv.slice(2));
 if (args.help || args.h) {
@@ -187,7 +187,7 @@ function printHelp() {
   console.log(`Pull normalized URA new sale and resale condo/apartment transaction snapshot
 
 Usage:
-  node docs/market-pulse-index/pull-ura-snapshot.mjs [options]
+  node research/market-pulse-index/pull-ura-snapshot.mjs [options]
 
 Options:
   --broker-url <url>   URA proxy URL. Defaults to ${DEFAULT_BROKER_URL}
