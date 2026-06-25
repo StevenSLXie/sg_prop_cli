@@ -107,13 +107,18 @@ export class UraError extends Error {
 }
 
 async function invokeBroker(brokerUrl: string, service: string, params: Record<string, string | number>): Promise<unknown> {
-  const response = await fetch(brokerUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ service, params }),
-    signal: AbortSignal.timeout(20000)
-  });
-  return parseUraResponse(response);
+  try {
+    const response = await fetch(brokerUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ service, params }),
+      signal: AbortSignal.timeout(60000)
+    });
+    return parseUraResponse(response);
+  } catch (error) {
+    if (error instanceof UraError) throw error;
+    throw new UraError("URA_SERVICE_UNAVAILABLE", `URA broker request failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 async function parseUraResponse(response: Response): Promise<unknown> {

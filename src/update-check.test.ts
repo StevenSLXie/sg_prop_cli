@@ -57,12 +57,12 @@ describe("package update check", () => {
   it("reports a newer npm version with an install command", async () => {
     const result = await checkPackageUpdate({
       now: new Date("2026-06-05T01:02:03.000Z"),
-      fetchImpl: async () => new Response(JSON.stringify({ version: "0.2.0" }), { status: 200 })
+      fetchImpl: async () => new Response(JSON.stringify({ version: "0.2.1" }), { status: 200 })
     });
 
     expect(result.source).toBe("network");
     expect(result.current_version).toBe(PACKAGE_VERSION);
-    expect(result.latest_version).toBe("0.2.0");
+    expect(result.latest_version).toBe("0.2.1");
     expect(result.update_available).toBe(true);
     expect(result.next_action).toBe("Run npm install -g sg-housing-data@latest");
   });
@@ -71,7 +71,7 @@ describe("package update check", () => {
     let fetchCount = 0;
     const fetchImpl = async () => {
       fetchCount += 1;
-      return new Response(JSON.stringify({ version: "0.2.0" }), { status: 200 });
+      return new Response(JSON.stringify({ version: "0.2.1" }), { status: 200 });
     };
 
     await checkPackageUpdate({ now: new Date("2026-06-05T00:00:00.000Z"), fetchImpl });
@@ -84,6 +84,6 @@ describe("package update check", () => {
 
     expect(fetchCount).toBe(1);
     expect(cached.source).toBe("cache");
-    expect(cached.latest_version).toBe("0.2.0");
+    expect(cached.latest_version).toBe("0.2.1");
   });
 });
