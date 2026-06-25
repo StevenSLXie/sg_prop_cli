@@ -67,6 +67,12 @@ Use sg-housing to check recent 5-room HDB resale transactions in Bukit Merah.
 Use sg-housing to find recent D'LEEDON private sale comparables and summarize price PSF.
 ```
 
+For multi-project private-sale trends, ask for analysis rather than row-by-row comparables:
+
+```text
+Use sg-housing to compare Parc Riviera, Normanton Park, Parc Esta, D'Leedon, and Sims Urban Oasis from 2025-Q1 to 2026-Q2 by quarter, with all transactions and a large-unit area proxy segment.
+```
+
 ## Claude Code
 
 Add the MCP server at user scope:
@@ -118,6 +124,37 @@ Restart Codex after changing the config.
 ## Example Use Cases
 
 Once configured, ask housing questions directly in your agent. The MCP server keeps tool calls bounded, returns compact data, and lets the agent write the final summary.
+
+Tool choice:
+
+- Use `analyze_private_residential_sales` for multi-project private condo trend tables, quarterly/monthly/yearly grouping, all-vs-segment comparisons, and metrics such as `count`, `price_median`, `price_psf_median`, and `area_sqm_median`.
+- Use `find_private_residential_sale_comparables` for compact evidence rows or capped shortlist summaries after narrowing by project, district, budget, area, sale type, or date.
+- URA private sale transactions do not include bedroom count. For "3 bedder and above" sale analysis, pass an explicit area-based proxy segment and report that assumption.
+
+Example `analyze_private_residential_sales` request shape for a five-project quarterly workflow:
+
+```json
+{
+  "projects": ["PARC RIVIERA", "NORMANTON PARK", "PARC ESTA", "D'LEEDON", "SIMS URBAN OASIS"],
+  "from": "2025-01",
+  "to": "2026-06",
+  "group_by": ["project", "quarter"],
+  "segments": [
+    { "name": "all" },
+    {
+      "name": "large",
+      "filters": { "area_sqm": { "gte": 90 } },
+      "proxy_for": "3 bedrooms or larger",
+      "unavailable_field": "bedrooms",
+      "proxy_field": "area_sqm"
+    }
+  ],
+  "metrics": ["count", "price_median", "price_psf_median", "area_sqm_median"],
+  "output": "long_table"
+}
+```
+
+The response puts the analysis table under `data.rows` with `data.columns`, structured proxy notes under `data.assumptions`, and scan diagnostics such as resolved URA batches under `data.diagnostics`.
 
 Optional experimental skill:
 
