@@ -110,6 +110,7 @@ export function normalizeDataGovFilterValues(sourceKey: SourceKey, filters: Hous
 
 function normalizeServerFilterValue(sourceKey: SourceKey, field: string, value: string | number): string | number {
   if (typeof value !== "string") return value;
+  if (sourceKey.startsWith("hdb_") && field === "flat_type") return normalizeHdbFlatType(value);
   if (!UPPERCASE_SERVER_FILTERS[sourceKey]?.has(field)) return value;
   const upper = value.toUpperCase();
   return sourceKey.startsWith("hdb_") && field === "street_name" ? normalizeHdbStreetName(upper) : upper;
@@ -155,4 +156,29 @@ function normalizeHdbStreetName(value: string): string {
     .split(/\s+/)
     .map((part) => replacements[part] ?? part)
     .join(" ");
+}
+
+export function normalizeHdbFlatType(value: string): string {
+  const normalized = value
+    .toUpperCase()
+    .replace(/-/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+  const aliases: Record<string, string> = {
+    "1 ROOM": "1 ROOM",
+    "ONE ROOM": "1 ROOM",
+    "2 ROOM": "2 ROOM",
+    "TWO ROOM": "2 ROOM",
+    "3 ROOM": "3 ROOM",
+    "THREE ROOM": "3 ROOM",
+    "4 ROOM": "4 ROOM",
+    "FOUR ROOM": "4 ROOM",
+    "5 ROOM": "5 ROOM",
+    "FIVE ROOM": "5 ROOM",
+    EXECUTIVE: "EXECUTIVE",
+    "MULTI GENERATION": "MULTI-GENERATION",
+    "MULTI-GENERATION": "MULTI-GENERATION",
+    "MULTI GEN": "MULTI-GENERATION"
+  };
+  return aliases[normalized] ?? normalized;
 }
