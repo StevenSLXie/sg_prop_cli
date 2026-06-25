@@ -7,6 +7,7 @@ import { isOk } from "./envelope.js";
 import { queryHousingRows } from "./query.js";
 import { listSources } from "./registry.js";
 import { checkPackageUpdate } from "./update-check.js";
+import { analyzePrivateResidentialSales } from "./ura-analysis.js";
 import type { ResultEnvelope, SourceCategory, SourceKey } from "./types.js";
 import {
   findPrivateResidentialRentalContracts,
@@ -141,6 +142,17 @@ export function createMcpServer(): McpServer {
   );
 
   server.registerTool(
+    "analyze_private_residential_sales",
+    {
+      title: "Analyze private residential sales",
+      description:
+        "Analyze URA private residential sale transactions for multi-project, quarterly/monthly/yearly trend and segment comparisons in one call. Use this for questions like comparing several condo projects across six quarters, with all-vs-large-unit segments and metrics such as count, price_median, price_psf_median, and area_sqm_median. Project/street/district inputs are resolved to minimal URA sale batches before fetching; bedroom count is unavailable in URA sale data, so use explicit proxy assumptions such as area_sqm for 3-bedroom-or-larger analysis.",
+      inputSchema: privateSalesAnalysisSchema()
+    },
+    async (args) => toolResult(await analyzePrivateResidentialSales(args))
+  );
+
+  server.registerTool(
     "find_private_residential_rental_contracts",
     {
       title: "Find private residential rental contracts",
@@ -208,6 +220,46 @@ function privateSaleSchema() {
     max_price_psf: z.number().optional(),
     floor_range: z.string().optional(),
     output_mode: z.enum(["rows", "summary", "both"]).optional()
+  };
+}
+
+function privateSalesAnalysisSchema() {
+  const segmentSchema = z.object({
+    name: z.string(),
+    filters: z.record(z.string(), z.any()).optional(),
+    proxy_for: z.string().optional(),
+    unavailable_field: z.string().optional(),
+    proxy_field: z.string().optional(),
+    note: z.string().optional()
+  });
+  return {
+    project: z.string().optional(),
+    projects: z.array(z.string()).optional(),
+    street: z.string().optional(),
+    streets: z.array(z.string()).optional(),
+    district: z.string().optional(),
+    districts: z.array(z.string()).optional(),
+    market_segment: z.string().optional(),
+    market_segments: z.array(z.string()).optional(),
+    property_type: z.string().optional(),
+    property_types: z.array(z.string()).optional(),
+    type_of_sale: z.enum(["new_sale", "sub_sale", "resale"]).optional(),
+    type_of_sales: z.array(z.enum(["new_sale", "sub_sale", "resale"])).optional(),
+    from: z.string().optional(),
+    to: z.string().optional(),
+    min_area_sqm: z.number().optional(),
+    max_area_sqm: z.number().optional(),
+    min_price: z.number().optional(),
+    max_price: z.number().optional(),
+    min_price_psf: z.number().optional(),
+    max_price_psf: z.number().optional(),
+    floor_range: z.string().optional(),
+    group_by: z.array(z.string()).optional(),
+    segments: z.array(segmentSchema).optional(),
+    metrics: z.array(z.string()).optional(),
+    output: z.enum(["long_table", "wide_table"]).optional(),
+    max_output_rows: z.number().int().positive().max(500).optional(),
+    max_output_columns: z.number().int().positive().max(80).optional()
   };
 }
 

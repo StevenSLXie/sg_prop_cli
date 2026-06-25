@@ -242,7 +242,7 @@ function flattenSummary(prefix: string, summary: ReturnType<typeof numericSummar
   };
 }
 
-function flattenSaleRows(payload: unknown, batch: number): Record<string, unknown>[] {
+export function flattenSaleRows(payload: unknown, batch: number): Record<string, unknown>[] {
   return resultArray(payload).flatMap((project) => {
     const projectRecord = project as Record<string, unknown>;
     return arrayAt(projectRecord, "transaction").map((transaction) => {
@@ -532,7 +532,7 @@ function validateSelect(sourceKey: SourceKey, select: string[]) {
     });
 }
 
-function uraFailure(tool: string, sourceKey: SourceKey, error: unknown) {
+export function uraFailure(tool: string, sourceKey: SourceKey, error: unknown) {
   if (error instanceof UraError) {
     const nextAction =
       error.code === "URA_REQUIRES_MAINTAINED_DISTRIBUTION"

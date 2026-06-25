@@ -10,6 +10,7 @@ import { listSources } from "./registry.js";
 import { startMcpServer } from "./mcp.js";
 import { checkPackageUpdate } from "./update-check.js";
 import type { HousingFilters, SourceCategory, SourceKey } from "./types.js";
+import { analyzePrivateResidentialSales, type AnalysisSegmentSpec } from "./ura-analysis.js";
 import {
   findPrivateResidentialRentalContracts,
   findPrivateResidentialSaleComparables,
@@ -131,6 +132,42 @@ privateCommand
   .option("--json", "write JSON output")
   .action(async (options: PrivateOptions) => {
     const result = await findPrivateResidentialSaleComparables(privateOptions(options));
+    write(result, options.json);
+    if (!isOk(result)) process.exitCode = 1;
+  });
+
+privateCommand
+  .command("analyze-sales")
+  .description("Analyze URA private residential sales by group, segment, and metric.")
+  .option("--project <project>", "single project name; repeatable", collect, [])
+  .option("--projects <projects>", "comma-separated project names")
+  .option("--street <street>", "single street name; repeatable", collect, [])
+  .option("--streets <streets>", "comma-separated street names")
+  .option("--district <district>", "single postal district; repeatable", collect, [])
+  .option("--districts <districts>", "comma-separated postal districts")
+  .option("--from <month>", "from contract month YYYY-MM")
+  .option("--to <month>", "to contract month YYYY-MM")
+  .option("--group-by <fields>", "comma-separated group fields, default project,quarter")
+  .option("--metrics <metrics>", "comma-separated metrics, e.g. count,price_median,price_psf_median")
+  .option("--segment-json <json>", "segment JSON object; repeatable", collect, [])
+  .option("--output <mode>", "long_table or wide_table")
+  .option("--max-output-rows <number>", "max analysis rows, default 300, max 500", parseInteger)
+  .option("--max-output-columns <number>", "max analysis columns, default 60, max 80", parseInteger)
+  .option("--json", "write JSON output")
+  .action(async (options: PrivateAnalysisOptions) => {
+    const result = await analyzePrivateResidentialSales({
+      projects: [...(options.project ?? []), ...(parseCsv(options.projects) ?? [])],
+      streets: [...(options.street ?? []), ...(parseCsv(options.streets) ?? [])],
+      districts: [...(options.district ?? []), ...(parseCsv(options.districts) ?? [])],
+      from: options.from,
+      to: options.to,
+      group_by: parseCsv(options.groupBy),
+      metrics: parseCsv(options.metrics),
+      segments: parseSegments(options.segmentJson),
+      output: options.output,
+      max_output_rows: options.maxOutputRows,
+      max_output_columns: options.maxOutputColumns
+    });
     write(result, options.json);
     if (!isOk(result)) process.exitCode = 1;
   });
@@ -310,6 +347,24 @@ type AggregateOptions = {
   json?: boolean;
 };
 
+type PrivateAnalysisOptions = {
+  project?: string[];
+  projects?: string;
+  street?: string[];
+  streets?: string;
+  district?: string[];
+  districts?: string;
+  from?: string;
+  to?: string;
+  groupBy?: string;
+  metrics?: string;
+  segmentJson?: string[];
+  output?: "long_table" | "wide_table";
+  maxOutputRows?: number;
+  maxOutputColumns?: number;
+  json?: boolean;
+};
+
 function collect(value: string, previous: string[]): string[] {
   previous.push(value);
   return previous;
@@ -351,6 +406,11 @@ function parseFilters(simpleFilters: string[] = [], filtersJson?: string): Housi
     parsed[item.slice(0, index)] = coerceFilterValue(item.slice(index + 1));
   }
   return Object.keys(parsed).length > 0 ? parsed : undefined;
+}
+
+function parseSegments(values: string[] | undefined): AnalysisSegmentSpec[] | undefined {
+  if (!values?.length) return undefined;
+  return values.map((value) => JSON.parse(value) as AnalysisSegmentSpec);
 }
 
 function coerceFilterValue(value: string): string | number | boolean {
