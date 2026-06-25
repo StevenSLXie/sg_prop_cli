@@ -1,10 +1,11 @@
-import { analyzeRows, type AnalysisOutputMode, type AnalysisSegment } from "./analysis-engine.js";
-import { DataGovClient } from "./datagov-client.js";
+import { AnalysisEngineError, analyzeRows, type AnalysisOutputMode, type AnalysisSegment } from "./analysis-engine.js";
+import { DataGovClient, DataGovError } from "./datagov-client.js";
 import { exactServerFilters, normalizeDataGovFilterValues, planDataGovScan } from "./datagov-planner.js";
+import { baseMeta, fail, ok, sourceAttribution } from "./envelope.js";
 import { rowMatchesFilters, resolveFilterAliases } from "./filters.js";
 import { normalizeRow } from "./query.js";
 import { requireSource } from "./registry.js";
-import type { HousingFilters } from "./types.js";
+import type { HousingFilters, ResultEnvelope } from "./types.js";
 
 export type HdbAnalysisSegmentSpec = {
   name: string;
@@ -20,6 +21,7 @@ export type HdbResaleAnalysisInput = {
   limit_rows_scanned?: number;
   max_output_rows?: number;
   max_output_columns?: number;
+  allow_partial?: boolean;
 };
 
 export type HdbResaleAnalysisScan = {
@@ -39,7 +41,15 @@ export type HdbResaleAnalysisResult = {
   scan: HdbResaleAnalysisScan;
 };
 
+export type AnalyzeHdbResaleTransactionsData = {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  diagnostics: Record<string, unknown>;
+  partial?: boolean;
+};
+
 const SOURCE_KEY = "hdb_resale_transactions";
+const TOOL = "analyze_hdb_resale_transactions";
 const PAGE_SIZE = 500;
 const DEFAULT_SCAN_LIMIT = 5000;
 const MAX_SCAN_LIMIT = 20000;
@@ -104,16 +114,61 @@ export async function scanHdbResaleAnalysisRows(input: HdbResaleAnalysisInput, c
 
 export async function analyzeHdbResaleRows(input: HdbResaleAnalysisInput, client = new DataGovClient()): Promise<HdbResaleAnalysisResult> {
   const scan = await scanHdbResaleAnalysisRows(input, client);
-  const result = analyzeRows({
-    rows: scan.rows,
-    groupBy: input.group_by?.length ? input.group_by : ["town", "flat_type", "quarter"],
-    segments: buildSegments(input.segments),
-    metrics: input.metrics?.length ? input.metrics : ["count", "resale_price_median", "price_psm_median", "floor_area_sqm_median"],
-    output: input.output ?? "long_table",
-    maxOutputRows: input.max_output_rows ?? 300,
-    maxOutputColumns: input.max_output_columns ?? 60
-  });
+  const result = materializeHdbResaleAnalysis(input, scan);
   return { ...result, scan };
+}
+
+export async function analyzeHdbResaleTransactions(
+  input: HdbResaleAnalysisInput,
+  client = new DataGovClient()
+): Promise<ResultEnvelope<AnalyzeHdbResaleTransactionsData>> {
+  const source = requireSource(SOURCE_KEY);
+  try {
+    const scan = await scanHdbResaleAnalysisRows(input, client);
+    const meta = {
+      ...baseMeta([SOURCE_KEY], [sourceAttribution(source, scan.dataset_ids[0])], source.caveats),
+      rows_returned: 0,
+      rows_scanned: scan.rows_scanned,
+      pages_scanned: scan.pages_scanned,
+      backend_total: scan.backend_total,
+      complete: scan.complete,
+      truncated: !scan.complete,
+      next_cursor: null
+    };
+
+    if (!scan.complete && !input.allow_partial) {
+      return fail(TOOL, "SCAN_LIMIT_REACHED", "HDB resale analysis scan cap was reached before the matching set was complete.", "Narrow filters or set allow_partial=true to inspect an explicitly partial table.", {
+        affected_sources: [SOURCE_KEY],
+        partial: { meta }
+      });
+    }
+
+    const result = materializeHdbResaleAnalysis(input, scan);
+    const data = {
+      ...result,
+      diagnostics: diagnostics(input, scan),
+      ...(scan.complete ? {} : { partial: true })
+    };
+    return ok(TOOL, data, {
+      ...meta,
+      rows_returned: result.rows.length
+    });
+  } catch (error) {
+    if (error instanceof AnalysisEngineError) {
+      return fail(TOOL, error.code, error.message, "Reduce groups, segments, or metrics, or raise output caps within documented limits.", {
+        affected_sources: [SOURCE_KEY]
+      });
+    }
+    if (error instanceof DataGovError) {
+      return fail(TOOL, error.code, error.message, "Retry later or narrow the query.", {
+        recoverable: true,
+        affected_sources: [SOURCE_KEY]
+      });
+    }
+    return fail(TOOL, "INTERNAL_ERROR", error instanceof Error ? error.message : String(error), "Retry or report the issue.", {
+      affected_sources: [SOURCE_KEY]
+    });
+  }
 }
 
 export function normalizeHdbAnalysisFilters(filters: HousingFilters | undefined): HousingFilters | undefined {
@@ -133,6 +188,31 @@ export function deriveHdbResaleAnalysisFields(row: Record<string, unknown>): Rec
     quarter: year && monthNumber ? `${year}-Q${Math.ceil(monthNumber / 3)}` : null,
     remaining_lease_bucket: remainingLeaseMonths === null ? null : remainingLeaseBucket(remainingLeaseMonths),
     price_psm: resalePrice !== null && floorAreaSqm && floorAreaSqm > 0 ? resalePrice / floorAreaSqm : null
+  };
+}
+
+function materializeHdbResaleAnalysis(input: HdbResaleAnalysisInput, scan: HdbResaleAnalysisScan) {
+  return analyzeRows({
+    rows: scan.rows,
+    groupBy: input.group_by?.length ? input.group_by : ["town", "flat_type", "quarter"],
+    segments: buildSegments(input.segments),
+    metrics: input.metrics?.length ? input.metrics : ["count", "resale_price_median", "price_psm_median", "floor_area_sqm_median"],
+    output: input.output ?? "long_table",
+    maxOutputRows: input.max_output_rows ?? 300,
+    maxOutputColumns: input.max_output_columns ?? 60
+  });
+}
+
+function diagnostics(input: HdbResaleAnalysisInput, scan: HdbResaleAnalysisScan): Record<string, unknown> {
+  return {
+    dataset_ids: scan.dataset_ids,
+    server_filters: scan.server_filters ?? null,
+    filters: scan.filters ?? null,
+    matching_rows: scan.rows.length,
+    group_by: input.group_by?.length ? input.group_by : ["town", "flat_type", "quarter"],
+    metrics: input.metrics?.length ? input.metrics : ["count", "resale_price_median", "price_psm_median", "floor_area_sqm_median"],
+    output: input.output ?? "long_table",
+    scan_complete: scan.complete
   };
 }
 

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { aggregateHousingRows } from "./aggregate.js";
 import { getDistributionMode } from "./credentials.js";
 import { isOk } from "./envelope.js";
+import { analyzeHdbResaleTransactions } from "./hdb-analysis.js";
 import { queryHousingRows } from "./query.js";
 import { listSources } from "./registry.js";
 import { checkPackageUpdate } from "./update-check.js";
@@ -103,6 +104,17 @@ export function createMcpServer(): McpServer {
       }
     },
     async (args) => toolResult(await aggregateHousingRows(args))
+  );
+
+  server.registerTool(
+    "analyze_hdb_resale_transactions",
+    {
+      title: "Analyze HDB resale transactions",
+      description:
+        "Analyze HDB resale transaction rows in one bounded scan with grouping, segments, and multiple metrics. Use for quarterly/yearly/town/flat-type/lease-bucket trend tables and all-vs-segment comparisons. Exact filters such as town, street_name, and flat_type are pushed to data.gov.sg where possible; flat_type aliases like '3-room', '3 room', and 'three room' normalize to '3 ROOM'. Returns no authoritative percentile table when the scan cap is reached unless allow_partial=true; percentile outputs do not use cursors.",
+      inputSchema: hdbResaleAnalysisSchema()
+    },
+    async (args) => toolResult(await analyzeHdbResaleTransactions(args))
   );
 
   server.registerTool(
@@ -220,6 +232,24 @@ function privateSaleSchema() {
     max_price_psf: z.number().optional(),
     floor_range: z.string().optional(),
     output_mode: z.enum(["rows", "summary", "both"]).optional()
+  };
+}
+
+function hdbResaleAnalysisSchema() {
+  const segmentSchema = z.object({
+    name: z.string(),
+    filters: filtersSchema
+  });
+  return {
+    filters: filtersSchema,
+    group_by: z.array(z.string()).optional(),
+    segments: z.array(segmentSchema).optional(),
+    metrics: z.array(z.string()).optional(),
+    output: z.enum(["long_table", "wide_table"]).optional(),
+    limit_rows_scanned: z.number().int().positive().max(20000).optional(),
+    max_output_rows: z.number().int().positive().max(500).optional(),
+    max_output_columns: z.number().int().positive().max(80).optional(),
+    allow_partial: z.boolean().optional()
   };
 }
 

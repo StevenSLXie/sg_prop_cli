@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeHdbResaleRows, deriveHdbResaleAnalysisFields, remainingLeaseBucket } from "./hdb-analysis.js";
+import { analyzeHdbResaleRows, analyzeHdbResaleTransactions, deriveHdbResaleAnalysisFields, remainingLeaseBucket } from "./hdb-analysis.js";
 
 describe("HDB resale analysis adapter", () => {
   it("prunes datasets, pushes exact filters, normalizes flat type aliases, and analyzes in one scan", async () => {
@@ -90,6 +90,92 @@ describe("HDB resale analysis adapter", () => {
       })
     );
   });
+
+  it("refuses authoritative output when scan cap is reached and allow_partial is false", async () => {
+    const fakeClient = partialFakeClient();
+
+    const result = await analyzeHdbResaleTransactions(
+      {
+        filters: { month: { gte: "2025-01" } },
+        group_by: ["town"],
+        metrics: ["count", "resale_price_median"],
+        limit_rows_scanned: 1
+      },
+      fakeClient as never
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("SCAN_LIMIT_REACHED");
+    expect(result.partial?.data).toBeUndefined();
+    expect(result.partial?.meta).toEqual(
+      expect.objectContaining({
+        rows_scanned: 1,
+        complete: false,
+        truncated: true,
+        next_cursor: null
+      })
+    );
+  });
+
+  it("returns explicit partial output when allow_partial is true", async () => {
+    const fakeClient = partialFakeClient();
+
+    const result = await analyzeHdbResaleTransactions(
+      {
+        filters: { month: { gte: "2025-01" } },
+        group_by: ["town"],
+        metrics: ["count", "resale_price_median"],
+        limit_rows_scanned: 1,
+        allow_partial: true
+      },
+      fakeClient as never
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.partial).toBe(true);
+    expect(result.data.rows).toEqual([expect.objectContaining({ town: "QUEENSTOWN", segment: "all", count: 1, resale_price_median: 500000 })]);
+    expect(result.data.diagnostics).toEqual(expect.objectContaining({ matching_rows: 1, scan_complete: false }));
+    expect(result.meta).toEqual(
+      expect.objectContaining({
+        rows_returned: 1,
+        rows_scanned: 1,
+        complete: false,
+        truncated: true,
+        next_cursor: null
+      })
+    );
+  });
+
+  it("returns validation errors when output caps are exceeded", async () => {
+    const fakeClient = {
+      async searchRows(params: Record<string, unknown>) {
+        return {
+          records: [
+            hdbRow({ town: "QUEENSTOWN" }),
+            hdbRow({ town: "TOA PAYOH" })
+          ],
+          total: 2,
+          resource_id: String(params.resourceId)
+        };
+      }
+    };
+
+    const result = await analyzeHdbResaleTransactions(
+      {
+        filters: { month: { gte: "2025-01" } },
+        group_by: ["town"],
+        metrics: ["count"],
+        max_output_rows: 1
+      },
+      fakeClient as never
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+  });
 });
 
 function hdbRow(overrides: Record<string, unknown>) {
@@ -106,5 +192,17 @@ function hdbRow(overrides: Record<string, unknown>) {
     remaining_lease: "80 years",
     resale_price: "500000",
     ...overrides
+  };
+}
+
+function partialFakeClient() {
+  return {
+    async searchRows(params: Record<string, unknown>) {
+      return {
+        records: [hdbRow({ month: "2025-03", resale_price: "500000" })],
+        total: 2,
+        resource_id: String(params.resourceId)
+      };
+    }
   };
 }

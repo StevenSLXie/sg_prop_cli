@@ -5,6 +5,7 @@ import { Command } from "commander";
 import { aggregateHousingRows } from "./aggregate.js";
 import { getCredentialStrategy, getDataGovStrategy, getDistributionMode } from "./credentials.js";
 import { isOk } from "./envelope.js";
+import { analyzeHdbResaleTransactions, type HdbAnalysisSegmentSpec } from "./hdb-analysis.js";
 import { queryHousingRows } from "./query.js";
 import { listSources } from "./registry.js";
 import { startMcpServer } from "./mcp.js";
@@ -99,6 +100,36 @@ program
       top_n: options.topN,
       limit_rows_scanned: options.limitRowsScanned,
       cursor: options.cursor,
+      allow_partial: options.allowPartial
+    });
+    write(result, options.json);
+    if (!isOk(result)) process.exitCode = 1;
+  });
+
+program
+  .command("hdb-resale-analysis")
+  .description("Analyze HDB resale transactions by group, segment, and metric.")
+  .option("--filter <key=value>", "simple equality filter; repeatable", collect, [])
+  .option("--filters-json <json>", "advanced filters JSON with operators")
+  .option("--group-by <fields>", "comma-separated group fields, default town,flat_type,quarter")
+  .option("--metrics <metrics>", "comma-separated metrics, e.g. count,resale_price_median,price_psm_median")
+  .option("--segment-json <json>", "segment JSON object; repeatable", collect, [])
+  .option("--output <mode>", "long_table or wide_table")
+  .option("--limit-rows-scanned <number>", "scan cap, default 5000, max 20000", parseInteger)
+  .option("--max-output-rows <number>", "max analysis rows, default 300, max 500", parseInteger)
+  .option("--max-output-columns <number>", "max analysis columns, default 60, max 80", parseInteger)
+  .option("--allow-partial", "return an explicitly partial table if scan cap is reached")
+  .option("--json", "write JSON output")
+  .action(async (options: HdbAnalysisOptions) => {
+    const result = await analyzeHdbResaleTransactions({
+      filters: parseFilters(options.filter, options.filtersJson),
+      group_by: parseCsv(options.groupBy),
+      metrics: parseCsv(options.metrics),
+      segments: parseHdbSegments(options.segmentJson),
+      output: options.output,
+      limit_rows_scanned: options.limitRowsScanned,
+      max_output_rows: options.maxOutputRows,
+      max_output_columns: options.maxOutputColumns,
       allow_partial: options.allowPartial
     });
     write(result, options.json);
@@ -347,6 +378,20 @@ type AggregateOptions = {
   json?: boolean;
 };
 
+type HdbAnalysisOptions = {
+  filter: string[];
+  filtersJson?: string;
+  groupBy?: string;
+  metrics?: string;
+  segmentJson?: string[];
+  output?: "long_table" | "wide_table";
+  limitRowsScanned?: number;
+  maxOutputRows?: number;
+  maxOutputColumns?: number;
+  allowPartial?: boolean;
+  json?: boolean;
+};
+
 type PrivateAnalysisOptions = {
   project?: string[];
   projects?: string;
@@ -411,6 +456,11 @@ function parseFilters(simpleFilters: string[] = [], filtersJson?: string): Housi
 function parseSegments(values: string[] | undefined): AnalysisSegmentSpec[] | undefined {
   if (!values?.length) return undefined;
   return values.map((value) => JSON.parse(value) as AnalysisSegmentSpec);
+}
+
+function parseHdbSegments(values: string[] | undefined): HdbAnalysisSegmentSpec[] | undefined {
+  if (!values?.length) return undefined;
+  return values.map((value) => JSON.parse(value) as HdbAnalysisSegmentSpec);
 }
 
 function coerceFilterValue(value: string): string | number | boolean {
