@@ -1,6 +1,7 @@
 import { AnalysisEngineError, analyzeRows, type AnalysisOutputMode, type AnalysisSegment } from "./analysis-engine.js";
+import { analysisField, validateAnalysisInput } from "./analysis-validation.js";
 import { DataGovClient, DataGovError } from "./datagov-client.js";
-import { exactServerFilters, normalizeDataGovFilterValues, planDataGovScan } from "./datagov-planner.js";
+import { exactServerFilters, normalizeDataGovFilterValues, normalizeHdbFlatType, planDataGovScan } from "./datagov-planner.js";
 import { baseMeta, fail, ok, sourceAttribution } from "./envelope.js";
 import { rowMatchesFilters, resolveFilterAliases } from "./filters.js";
 import { normalizeRow } from "./query.js";
@@ -44,6 +45,7 @@ export type HdbResaleAnalysisResult = {
 export type AnalyzeHdbResaleTransactionsData = {
   columns: string[];
   rows: Record<string, unknown>[];
+  assumptions: Record<string, unknown>[];
   diagnostics: Record<string, unknown>;
   partial?: boolean;
 };
@@ -57,6 +59,10 @@ const MAX_SCAN_LIMIT = 20000;
 export async function scanHdbResaleAnalysisRows(input: HdbResaleAnalysisInput, client = new DataGovClient()): Promise<HdbResaleAnalysisScan> {
   const source = requireSource(SOURCE_KEY);
   const filters = normalizeHdbAnalysisFilters(resolveFilterAliases(source.fields, input.filters));
+  const validationErrors = validateHdbAnalysisRequest(input, filters, source.fields);
+  if (validationErrors.length > 0) {
+    throw new AnalysisEngineError("VALIDATION_ERROR", validationErrors.join(" "));
+  }
   const datasetIds = source.dataset_ids ?? [];
   const scanPlan = planDataGovScan(source.source_key, datasetIds, filters);
   const scanLimit = clamp(input.limit_rows_scanned ?? DEFAULT_SCAN_LIMIT, 1, MAX_SCAN_LIMIT);
@@ -146,6 +152,7 @@ export async function analyzeHdbResaleTransactions(
     const result = materializeHdbResaleAnalysis(input, scan);
     const data = {
       ...result,
+      assumptions: [],
       diagnostics: diagnostics(input, scan),
       ...(scan.complete ? {} : { partial: true })
     };
@@ -192,11 +199,15 @@ export function deriveHdbResaleAnalysisFields(row: Record<string, unknown>): Rec
 }
 
 function materializeHdbResaleAnalysis(input: HdbResaleAnalysisInput, scan: HdbResaleAnalysisScan) {
+  const source = requireSource(SOURCE_KEY);
+  const groupBy = input.group_by?.length ? input.group_by : ["town", "flat_type", "quarter"];
+  const metrics = input.metrics?.length ? input.metrics : ["count", "resale_price_median", "price_psm_median", "floor_area_sqm_median"];
+  const segments = normalizeSegments(input.segments, source.fields);
   return analyzeRows({
     rows: scan.rows,
-    groupBy: input.group_by?.length ? input.group_by : ["town", "flat_type", "quarter"],
-    segments: buildSegments(input.segments),
-    metrics: input.metrics?.length ? input.metrics : ["count", "resale_price_median", "price_psm_median", "floor_area_sqm_median"],
+    groupBy,
+    segments: buildSegments(segments),
+    metrics,
     output: input.output ?? "long_table",
     maxOutputRows: input.max_output_rows ?? 300,
     maxOutputColumns: input.max_output_columns ?? 60
@@ -204,13 +215,15 @@ function materializeHdbResaleAnalysis(input: HdbResaleAnalysisInput, scan: HdbRe
 }
 
 function diagnostics(input: HdbResaleAnalysisInput, scan: HdbResaleAnalysisScan): Record<string, unknown> {
+  const groupBy = input.group_by?.length ? input.group_by : ["town", "flat_type", "quarter"];
+  const metrics = input.metrics?.length ? input.metrics : ["count", "resale_price_median", "price_psm_median", "floor_area_sqm_median"];
   return {
     dataset_ids: scan.dataset_ids,
     server_filters: scan.server_filters ?? null,
     filters: scan.filters ?? null,
     matching_rows: scan.rows.length,
-    group_by: input.group_by?.length ? input.group_by : ["town", "flat_type", "quarter"],
-    metrics: input.metrics?.length ? input.metrics : ["count", "resale_price_median", "price_psm_median", "floor_area_sqm_median"],
+    group_by: groupBy,
+    metrics,
     output: input.output ?? "long_table",
     scan_complete: scan.complete
   };
@@ -222,15 +235,72 @@ export function remainingLeaseBucket(months: number): string {
   return `${String(start).padStart(3, "0")}-${String(end).padStart(3, "0")} months`;
 }
 
+function validateHdbAnalysisRequest(input: HdbResaleAnalysisInput, filters: HousingFilters | undefined, fields: ReturnType<typeof requireSource>["fields"]): string[] {
+  const groupBy = input.group_by?.length ? input.group_by : ["town", "flat_type", "quarter"];
+  const metrics = input.metrics?.length ? input.metrics : ["count", "resale_price_median", "price_psm_median", "floor_area_sqm_median"];
+  const segments = normalizeSegments(input.segments, fields);
+  return [
+    ...validateAnalysisInput({
+      fields,
+      derivedFields: hdbDerivedFields(),
+      groupBy,
+      metrics,
+      filters: [filters, ...segments.map((segment) => segment.filters)].filter((item): item is HousingFilters => Boolean(item))
+    }),
+    ...validateFlatTypes([filters, ...segments.map((segment) => segment.filters)])
+  ];
+}
+
+function normalizeSegments(specs: HdbAnalysisSegmentSpec[] | undefined, fields: ReturnType<typeof requireSource>["fields"]): HdbAnalysisSegmentSpec[] {
+  return (specs ?? []).map((segment) => ({
+    ...segment,
+    filters: normalizeHdbAnalysisFilters(resolveFilterAliases(fields, segment.filters))
+  }));
+}
+
 function buildSegments(specs: HdbAnalysisSegmentSpec[] | undefined): AnalysisSegment<Record<string, unknown>>[] {
   if (!specs?.length) return [{ name: "all" }];
-  return specs.map((segment) => {
-    const filters = normalizeHdbAnalysisFilters(segment.filters);
-    return {
-      name: segment.name,
-      matches: filters ? (row) => rowMatchesFilters(row, filters) : undefined
-    };
-  });
+  return specs.map((segment) => ({
+    name: segment.name,
+    matches: segment.filters ? (row) => rowMatchesFilters(row, segment.filters) : undefined
+  }));
+}
+
+function hdbDerivedFields() {
+  return [
+    analysisField("quarter", "quarter", ["eq", "in", "gte", "lte"]),
+    analysisField("year", "string", ["eq", "in", "gte", "lte"]),
+    analysisField("remaining_lease_bucket", "string", ["eq", "in"]),
+    analysisField("price_psm", "number", ["eq", "gte", "lte"])
+  ];
+}
+
+function validateFlatTypes(filtersList: Array<HousingFilters | undefined>): string[] {
+  const allowed = new Set(["1 ROOM", "2 ROOM", "3 ROOM", "4 ROOM", "5 ROOM", "EXECUTIVE", "MULTI-GENERATION"]);
+  const errors: string[] = [];
+  for (const filters of filtersList) {
+    if (!filters) continue;
+    for (const [field, condition] of Object.entries(filters)) {
+      const base = field.replace(/_(gte|lte)$/, "");
+      if (base !== "flat_type") continue;
+      const values = flatTypeValues(condition);
+      for (const value of values) {
+        const normalized = normalizeHdbFlatType(String(value));
+        if (!allowed.has(normalized)) errors.push(`Invalid HDB flat_type '${value}'.`);
+      }
+    }
+  }
+  return errors;
+}
+
+function flatTypeValues(condition: unknown): unknown[] {
+  if (Array.isArray(condition)) return condition;
+  if (typeof condition !== "object" || condition === null) return [condition];
+  if ("op" in condition) {
+    const value = (condition as { value?: unknown }).value;
+    return Array.isArray(value) ? value : [value];
+  }
+  return [];
 }
 
 function isBelowStopValue(row: Record<string, unknown>, stop: { field: string; value: string }): boolean {

@@ -129,6 +129,35 @@ describe("URA private residential sales analysis", () => {
     expect(result.error.code).toBe("VALIDATION_ERROR");
     expect(result.error.details?.candidate_plan).toEqual(expect.objectContaining({ batches: [1] }));
   });
+
+  it("rejects unknown group, metric, and segment filter fields before scanning", async () => {
+    const fakeClient = {
+      async invoke() {
+        throw new Error("should not scan");
+      }
+    };
+
+    const result = await analyzePrivateResidentialSales(
+      {
+        projects: ["NORMANTON PARK"],
+        group_by: ["project_typo"],
+        metrics: ["price_typo_median"],
+        segments: [{ name: "bedrooms", filters: { bedrooms_gte: 3 } }]
+      },
+      fakeClient as never
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(result.error.details?.validation_errors).toEqual(
+      expect.arrayContaining([
+        "Unknown group_by field 'project_typo'.",
+        "Unknown metric field 'price_typo' in 'price_typo_median'.",
+        "Unknown filter field 'bedrooms'."
+      ])
+    );
+  });
 });
 
 function projectPayload(project: string, street: string, marketSegment: string, district: string, area: number, basePrice: number) {

@@ -46,8 +46,8 @@ describe("URA project resolver", () => {
     expect(plan.batches).toEqual([1, 2]);
     expect(plan.broad_scan_reason).toBeUndefined();
     expect(plan.resolved_projects).toEqual([
-      expect.objectContaining({ input: "West Coast Vale", matched_project: "PARC RIVIERA", batch: 1 }),
-      expect.objectContaining({ input: "Sims Avenue", matched_project: "PARC ESTA", batch: 2 })
+      expect.objectContaining({ input: "West Coast Vale", confidence: "ambiguous", batch: 1 }),
+      expect.objectContaining({ input: "Sims Avenue", confidence: "ambiguous", batch: 2 })
     ]);
   });
 
@@ -68,6 +68,17 @@ describe("URA project resolver", () => {
     expect(plan.unresolved_inputs).toEqual(["Unknown Project"]);
     expect(plan.broad_scan_reason).toContain("could not be resolved");
     expect(plan.resolved_projects).toEqual([expect.objectContaining({ input: "Unknown Project", confidence: "unresolved" })]);
+  });
+
+  it("does not broad scan when unresolved inputs are paired with resolved candidate batches", () => {
+    const plan = resolveUraSaleCandidatePlan({
+      projects: ["Unknown Project"],
+      streets: ["Sims Drive"]
+    });
+
+    expect(plan.batches).toEqual([2]);
+    expect(plan.unresolved_inputs).toEqual(["Unknown Project"]);
+    expect(plan.broad_scan_reason).toBeUndefined();
   });
 
   it("reports ambiguous inputs without pretending exact project precision", () => {

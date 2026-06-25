@@ -134,6 +134,7 @@ describe("HDB resale analysis adapter", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    expect(result.data.assumptions).toEqual([]);
     expect(result.data.partial).toBe(true);
     expect(result.data.rows).toEqual([expect.objectContaining({ town: "QUEENSTOWN", segment: "all", count: 1, resale_price_median: 500000 })]);
     expect(result.data.diagnostics).toEqual(expect.objectContaining({ matching_rows: 1, scan_complete: false }));
@@ -175,6 +176,34 @@ describe("HDB resale analysis adapter", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects invalid filters, metric fields, and flat type aliases", async () => {
+    const fakeClient = {
+      async searchRows() {
+        throw new Error("should not scan");
+      }
+    };
+
+    const result = await analyzeHdbResaleTransactions(
+      {
+        filters: { flat_typo: "3 ROOM", flat_type: "castle" },
+        group_by: ["town_typo"],
+        metrics: ["resale_typo_median"],
+        segments: [{ name: "bad", filters: { flat_type: "executive apartment", bedrooms_gte: 3 } }]
+      },
+      fakeClient as never
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(result.error.message).toContain("Unknown group_by field 'town_typo'.");
+    expect(result.error.message).toContain("Unknown metric field 'resale_typo' in 'resale_typo_median'.");
+    expect(result.error.message).toContain("Unknown filter field 'flat_typo'.");
+    expect(result.error.message).toContain("Unknown filter field 'bedrooms'.");
+    expect(result.error.message).toContain("Invalid HDB flat_type 'CASTLE'.");
+    expect(result.error.message).not.toContain("executive apartment");
   });
 });
 

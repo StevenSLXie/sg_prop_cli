@@ -1,6 +1,7 @@
 import { AnalysisEngineError, analyzeRows, type AnalysisOutputMode, type AnalysisSegment } from "./analysis-engine.js";
+import { analysisField, validateAnalysisInput } from "./analysis-validation.js";
 import { baseMeta, fail, ok, sourceAttribution } from "./envelope.js";
-import { rowMatchesFilters } from "./filters.js";
+import { resolveFilterAliases, rowMatchesFilters } from "./filters.js";
 import { requireSource } from "./registry.js";
 import type { HousingFilters, ResultEnvelope } from "./types.js";
 import { UraClient } from "./ura-client.js";
@@ -65,6 +66,22 @@ export async function analyzePrivateResidentialSales(
   const streets = uniqueStrings([input.street, ...(input.streets ?? [])]);
   const districts = uniqueStrings([input.district, ...(input.districts ?? [])]);
   const plan = resolveUraSaleCandidatePlan({ projects, streets, districts });
+  const groupBy = input.group_by?.length ? input.group_by : ["project", "quarter"];
+  const metrics = input.metrics?.length ? input.metrics : ["count", "price_median", "price_psf_median", "area_sqm_median"];
+  const normalizedSegments = normalizeSegments(input.segments, source.fields);
+  const validationErrors = validateAnalysisInput({
+    fields: source.fields,
+    derivedFields: uraDerivedFields(),
+    groupBy,
+    metrics,
+    filters: normalizedSegments.map((segment) => segment.filters).filter((filters): filters is HousingFilters => Boolean(filters))
+  });
+  if (validationErrors.length > 0) {
+    return fail(TOOL, "VALIDATION_ERROR", "Invalid private sale analysis fields or filters.", "Inspect list_housing_sources and use supported fields, metrics, and segment filters.", {
+      affected_sources: [SOURCE_KEY],
+      details: { validation_errors: validationErrors, candidate_plan: plan }
+    });
+  }
 
   try {
     const scannedRows: Record<string, unknown>[] = [];
@@ -74,12 +91,12 @@ export async function analyzePrivateResidentialSales(
     }
 
     const rows = scannedRows.filter((row) => rowMatchesSaleAnalysisInput(row, input, projects, streets, districts));
-    const segments = buildSegments(input.segments);
+    const segments = buildSegments(normalizedSegments);
     const result = analyzeRows({
       rows,
-      groupBy: input.group_by?.length ? input.group_by : ["project", "quarter"],
+      groupBy,
       segments,
-      metrics: input.metrics?.length ? input.metrics : ["count", "price_median", "price_psf_median", "area_sqm_median"],
+      metrics,
       output: input.output ?? "long_table",
       maxOutputRows: input.max_output_rows ?? 300,
       maxOutputColumns: input.max_output_columns ?? 60
@@ -89,14 +106,14 @@ export async function analyzePrivateResidentialSales(
       TOOL,
       {
         ...result,
-        assumptions: buildAssumptions(input.segments),
+        assumptions: buildAssumptions(normalizedSegments),
         diagnostics: {
           candidate_plan: plan,
           batches_requested: plan.batches,
           rows_scanned: scannedRows.length,
           matching_rows: rows.length,
-          group_by: input.group_by?.length ? input.group_by : ["project", "quarter"],
-          metrics: input.metrics?.length ? input.metrics : ["count", "price_median", "price_psf_median", "area_sqm_median"],
+          group_by: groupBy,
+          metrics,
           output: input.output ?? "long_table"
         }
       },
@@ -161,12 +178,29 @@ function rowMatchesSaleAnalysisInput(
   return rowMatchesFilters(row, filters);
 }
 
+function normalizeSegments(specs: AnalysisSegmentSpec[] | undefined, fields: ReturnType<typeof requireSource>["fields"]): AnalysisSegmentSpec[] {
+  return (specs ?? []).map((segment) => ({
+    ...segment,
+    filters: resolveFilterAliases(fields, segment.filters)
+  }));
+}
+
 function buildSegments(specs: AnalysisSegmentSpec[] | undefined): AnalysisSegment<Record<string, unknown>>[] {
   if (!specs?.length) return [{ name: "all" }];
   return specs.map((segment) => ({
     name: segment.name,
     matches: segment.filters ? (row) => rowMatchesFilters(row, segment.filters) : undefined
   }));
+}
+
+function uraDerivedFields() {
+  return [
+    analysisField("month", "month", ["eq", "gte", "lte"]),
+    analysisField("quarter", "quarter", ["eq", "in", "gte", "lte"]),
+    analysisField("year", "string", ["eq", "in", "gte", "lte"]),
+    analysisField("price_psm", "number", ["eq", "gte", "lte"]),
+    analysisField("batch", "number", ["eq", "in", "gte", "lte"])
+  ];
 }
 
 function buildAssumptions(specs: AnalysisSegmentSpec[] | undefined): Record<string, unknown>[] {

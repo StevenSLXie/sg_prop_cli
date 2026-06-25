@@ -28,7 +28,9 @@ const UPPERCASE_SERVER_FILTERS: Partial<Record<SourceKey, Set<string>>> = {
   cea_residential_transactions: new Set(["salesperson_name", "property_type", "transaction_type", "represented", "town"])
 };
 
-const DERIVED_FIELDS = new Set(["remaining_lease_months"]);
+const DERIVED_FIELDS: Partial<Record<SourceKey, Set<string>>> = {
+  hdb_resale_transactions: new Set(["remaining_lease_months", "quarter", "year", "remaining_lease_bucket", "price_psm"])
+};
 
 export function planDataGovScan(sourceKey: SourceKey, datasetIds: string[], filters: HousingFilters | undefined): DataGovScanPlan {
   if (sourceKey !== "hdb_resale_transactions") return { datasetIds };
@@ -64,7 +66,7 @@ export function exactServerFilters(
   const resolved = normalizeDataGovFilterValues(sourceKey, resolveFilterAliases(source.fields, filters));
   const serverFilters: Record<string, string | number | Array<string | number>> = {};
   for (const filter of normalizeFilters(resolved)) {
-    if (DERIVED_FIELDS.has(filter.field)) continue;
+    if (DERIVED_FIELDS[sourceKey]?.has(filter.field)) continue;
     if (filter.op !== "eq" && filter.op !== "in") continue;
     if (typeof filter.value === "boolean") continue;
     if (Array.isArray(filter.value)) {
@@ -175,7 +177,10 @@ export function normalizeHdbFlatType(value: string): string {
     "FOUR ROOM": "4 ROOM",
     "5 ROOM": "5 ROOM",
     "FIVE ROOM": "5 ROOM",
+    EXEC: "EXECUTIVE",
     EXECUTIVE: "EXECUTIVE",
+    "EXECUTIVE APARTMENT": "EXECUTIVE",
+    "EXECUTIVE MAISONETTE": "EXECUTIVE",
     "MULTI GENERATION": "MULTI-GENERATION",
     "MULTI-GENERATION": "MULTI-GENERATION",
     "MULTI GEN": "MULTI-GENERATION"

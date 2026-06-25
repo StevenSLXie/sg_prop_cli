@@ -58,9 +58,15 @@ export function resolveUraSaleCandidatePlan(input: ResolveUraSaleCandidatePlanIn
   let batches: number[];
   let broadScanReason: string | undefined;
 
-  if (unresolvedInputs.length > 0) {
+  if (unresolvedInputs.length > 0 && projectBatches.length === 0 && districtBatches.length === 0) {
     batches = ALL_BATCHES;
     broadScanReason = "One or more project/street inputs could not be resolved to a URA batch.";
+  } else if (unresolvedInputs.length > 0 && districtBatches.length > 0 && projectBatches.length > 0) {
+    batches = projectBatches.filter((batch) => districtBatches.includes(batch));
+  } else if (unresolvedInputs.length > 0 && projectBatches.length > 0) {
+    batches = projectBatches;
+  } else if (unresolvedInputs.length > 0 && districtBatches.length > 0) {
+    batches = districtBatches;
   } else if (hasAmbiguousInput && projectBatches.length === 0) {
     batches = ALL_BATCHES;
     broadScanReason = "One or more project/street inputs were ambiguous and did not resolve to a concrete batch.";
